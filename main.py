@@ -7,7 +7,7 @@ from rich.table import Table
 from rich import box
 
 from open_meteo import OpenMeteo, GeocodingResult
-from settings import get_settings
+from settings import get_settings, AVAILABLE_MODELS
 
 om = OpenMeteo()
 console = Console()
@@ -50,6 +50,7 @@ def config_show():
     table.add_row("temperature_unit", settings.temperature_unit)
     table.add_row("wind_speed_unit", settings.wind_speed_unit)
     table.add_row("precipitation_unit", settings.precipitation_unit)
+    table.add_row("model", settings.model or "(auto)")
 
     console.print(table)
 
@@ -67,6 +68,7 @@ def config_set(key: str, value: str):
       temperature_unit   celsius or fahrenheit
       wind_speed_unit    kmh, ms, mph, or kn
       precipitation_unit mm or inch
+      model              Weather model (see 'weather config models')
     """
     settings = get_settings()
 
@@ -90,6 +92,12 @@ def config_set(key: str, value: str):
         if value not in ("mm", "inch"):
             raise click.ClickException("precipitation_unit must be 'mm' or 'inch'")
         settings.precipitation_unit = value  # type: ignore
+    elif key == "model":
+        if value not in AVAILABLE_MODELS and value != "auto":
+            raise click.ClickException(
+                f"Unknown model: {value}. Run 'weather config models' to see available models."
+            )
+        settings.model = None if value == "auto" else value
     else:
         raise click.ClickException(f"Unknown setting: {key}")
 
@@ -107,6 +115,8 @@ def config_unset(key: str):
         settings.location = None
     elif key == "country_code":
         settings.country_code = None
+    elif key == "model":
+        settings.model = None
     elif key in ("temperature_unit", "wind_speed_unit", "precipitation_unit"):
         raise click.ClickException(f"Cannot unset {key}, use 'config set' to change it")
     else:
@@ -114,6 +124,32 @@ def config_unset(key: str):
 
     settings.save()
     console.print(f"[green]Unset {key}[/green]")
+
+
+@config.command("models")
+def config_models():
+    """List available weather models."""
+    console.print("\n[bold]Available weather models:[/bold]\n")
+    console.print("[dim]Use 'weather config set model <name>' to set a default.[/dim]")
+    console.print("[dim]Or use '--model <name>' flag on any command.[/dim]\n")
+
+    models_by_category = {
+        "Global": ["auto"],
+        "ECMWF (European)": ["ecmwf", "ecmwf_aifs"],
+        "US (NOAA)": ["gfs", "hrrr"],
+        "German (DWD)": ["icon", "icon_eu", "icon_d2"],
+        "French (Météo-France)": ["arpege", "arome"],
+        "UK (Met Office)": ["ukmo"],
+        "Canadian (GEM)": ["gem", "gem_hrdps"],
+        "Japanese (JMA)": ["jma"],
+        "Norwegian (MET)": ["metno"],
+    }
+
+    for category, models in models_by_category.items():
+        console.print(f"[cyan]{category}[/cyan]")
+        for model in models:
+            console.print(f"  {model}")
+    console.print()
 
 
 # =============================================================================
@@ -215,7 +251,13 @@ def format_precip_chance(chance: int, prev_chance: int) -> str:
 @click.option(
     "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
 )
-def current(location: str | None, country: str | None):
+@click.option(
+    "-m",
+    "--model",
+    "model_name",
+    help="Weather model to use (see 'weather config models')",
+)
+def current(location: str | None, country: str | None, model_name: str | None):
     """Get current weather for a location."""
     settings = get_settings()
 
@@ -229,6 +271,11 @@ def current(location: str | None, country: str | None):
 
     if country is None:
         country = settings.country_code
+
+    # Resolve model (CLI flag > settings > auto)
+    model_key = model_name or settings.model
+    api_model = AVAILABLE_MODELS.get(model_key) if model_key else None
+    models = [api_model] if api_model else None
 
     result = geocode(location, country)
 
@@ -247,6 +294,7 @@ def current(location: str | None, country: str | None):
         ],
         temperature_unit=settings.temperature_unit,
         wind_speed_unit=settings.wind_speed_unit,
+        models=models,
     )
     c = weather.current
     if c is None:
@@ -283,8 +331,16 @@ def current(location: str | None, country: str | None):
     "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
 )
 @click.option("-n", "--hours", default=12, help="Number of hours to show (default: 12)")
-def hourly(location: str | None, country: str | None, hours: int):
-    """Show hourly forecast with deltas and emojis."""
+@click.option(
+    "-m",
+    "--model",
+    "model_name",
+    help="Weather model to use (see 'weather config models')",
+)
+def hourly(
+    location: str | None, country: str | None, hours: int, model_name: str | None
+):
+    """Show hourly forecast with deltas."""
     settings = get_settings()
 
     # Use defaults from settings if not provided
@@ -297,6 +353,11 @@ def hourly(location: str | None, country: str | None, hours: int):
 
     if country is None:
         country = settings.country_code
+
+    # Resolve model (CLI flag > settings > auto)
+    model_key = model_name or settings.model
+    api_model = AVAILABLE_MODELS.get(model_key) if model_key else None
+    models = [api_model] if api_model else None
 
     result = geocode(location, country)
 
@@ -313,6 +374,7 @@ def hourly(location: str | None, country: str | None, hours: int):
         ],
         temperature_unit=settings.temperature_unit,
         wind_speed_unit=settings.wind_speed_unit,
+        models=models,
         forecast_days=2,  # Need 2 days to get enough hours
     )
     h = weather.hourly
