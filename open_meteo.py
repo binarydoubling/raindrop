@@ -9,6 +9,7 @@ from typing import Any, Literal
 FORECAST_BASE_URL = "https://api.open-meteo.com/v1"
 GEOCODING_BASE_URL = "https://geocoding-api.open-meteo.com/v1"
 AIR_QUALITY_BASE_URL = "https://air-quality-api.open-meteo.com/v1"
+HISTORICAL_BASE_URL = "https://archive-api.open-meteo.com/v1"
 NWS_API_BASE_URL = "https://api.weather.gov"
 
 
@@ -377,11 +378,13 @@ class OpenMeteo:
         forecast_base_url: str = FORECAST_BASE_URL,
         geocoding_base_url: str = GEOCODING_BASE_URL,
         air_quality_base_url: str = AIR_QUALITY_BASE_URL,
+        historical_base_url: str = HISTORICAL_BASE_URL,
         timeout: int = 10,
     ):
         self.forecast_base_url = forecast_base_url
         self.geocoding_base_url = geocoding_base_url
         self.air_quality_base_url = air_quality_base_url
+        self.historical_base_url = historical_base_url
         self.timeout = timeout
 
     def _request(self, url: str) -> dict[str, Any]:
@@ -791,6 +794,58 @@ class OpenMeteo:
             current=current_aq,
             hourly=hourly_aq,
         )
+
+    def historical(
+        self,
+        latitude: float,
+        longitude: float,
+        start_date: str,
+        end_date: str,
+        *,
+        daily: list[str] | None = None,
+        hourly: list[str] | None = None,
+        temperature_unit: TemperatureUnit = "celsius",
+        wind_speed_unit: WindSpeedUnit = "kmh",
+        precipitation_unit: PrecipitationUnit = "mm",
+        timezone: str = "auto",
+    ) -> dict[str, Any]:
+        """
+        Get historical weather data for a location.
+
+        Args:
+            latitude: Latitude (-90 to 90)
+            longitude: Longitude (-180 to 180)
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            daily: Daily weather variables to include
+            hourly: Hourly weather variables to include
+            temperature_unit: Temperature unit
+            wind_speed_unit: Wind speed unit
+            precipitation_unit: Precipitation unit
+            timezone: Timezone for times
+
+        Returns:
+            Raw API response dict with daily/hourly data
+
+        Raises:
+            OpenMeteoError: If request fails
+        """
+        query = self._build_query(
+            {
+                "latitude": latitude,
+                "longitude": longitude,
+                "start_date": start_date,
+                "end_date": end_date,
+                "daily": daily,
+                "hourly": hourly,
+                "temperature_unit": temperature_unit,
+                "wind_speed_unit": wind_speed_unit,
+                "precipitation_unit": precipitation_unit,
+                "timezone": timezone,
+            }
+        )
+        url = f"{self.historical_base_url}/archive?{query}"
+        return self._request(url)
 
 
 # =============================================================================

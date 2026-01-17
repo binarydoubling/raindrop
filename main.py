@@ -1932,5 +1932,402 @@ def precip(
             console.print(f"[dim]Next 24h amount:[/dim] {sparkline(amounts)}")
 
 
+# =============================================================================
+# Compare command
+# =============================================================================
+
+
+@cli.command()
+@click.argument("locations", nargs=-1, required=True)
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def compare(locations: tuple[str, ...], as_json: bool):
+    """Compare current weather across multiple locations.
+
+    Provide 2 or more locations (or favorite aliases) to compare.
+
+    \b
+    Examples:
+      raindrop compare "San Francisco" "New York" "Miami"
+      raindrop compare home work  # using favorites
+    """
+    if len(locations) < 2:
+        raise click.ClickException("Please provide at least 2 locations to compare")
+
+    settings = get_settings()
+    temp_symbol = TEMP_SYMBOLS[settings.temperature_unit]
+    wind_symbol = WIND_SYMBOLS[settings.wind_speed_unit]
+
+    # Fetch weather for all locations
+    results = []
+    for loc in locations:
+        try:
+            # Resolve favorites
+            resolved_loc, resolved_country = settings.resolve_location(loc)
+            geo = geocode(resolved_loc, resolved_country)
+
+            weather = om.forecast(
+                geo.latitude,
+                geo.longitude,
+                current=[
+                    "temperature_2m",
+                    "apparent_temperature",
+                    "weather_code",
+                    "wind_speed_10m",
+                    "relative_humidity_2m",
+                    "precipitation",
+                ],
+                temperature_unit=settings.temperature_unit,
+                wind_speed_unit=settings.wind_speed_unit,
+                forecast_days=1,
+            )
+
+            c = weather.current
+            if c:
+                results.append(
+                    {
+                        "input": loc,
+                        "name": geo.name,
+                        "admin1": geo.admin1,
+                        "country": geo.country,
+                        "latitude": geo.latitude,
+                        "longitude": geo.longitude,
+                        "temperature": c.temperature_2m,
+                        "feels_like": c.apparent_temperature,
+                        "weather_code": c.weather_code,
+                        "wind_speed": c.wind_speed_10m,
+                        "humidity": c.relative_humidity_2m,
+                        "precipitation": c.precipitation,
+                        "time": c.time,
+                    }
+                )
+        except Exception as e:
+            results.append(
+                {
+                    "input": loc,
+                    "error": str(e),
+                }
+            )
+
+    # JSON output
+    if as_json:
+        data = {
+            "locations": results,
+            "units": {
+                "temperature": settings.temperature_unit,
+                "wind_speed": settings.wind_speed_unit,
+            },
+        }
+        click.echo(json_lib.dumps(data, indent=2))
+        return
+
+    # Table output
+    console.print("\n[bold]Weather Comparison[/bold]\n")
+
+    table = Table(show_header=True, box=box.ROUNDED, header_style="bold")
+    table.add_column("Location", style="cyan")
+    table.add_column("Temp", justify="right")
+    table.add_column("Feels", justify="right")
+    table.add_column("Weather", justify="left")
+    table.add_column("Wind", justify="right")
+    table.add_column("Humidity", justify="right")
+
+    for r in results:
+        if "error" in r:
+            table.add_row(
+                r["input"],
+                "[red]Error[/red]",
+                "",
+                f"[dim]{r['error'][:30]}...[/dim]"
+                if len(r.get("error", "")) > 30
+                else f"[dim]{r.get('error', '')}[/dim]",
+                "",
+                "",
+            )
+        else:
+            # Format location
+            loc_str = r["name"]
+            if r.get("admin1"):
+                loc_str += f", {r['admin1'][:2]}"  # Abbreviate state
+
+            # Weather label
+            code = r.get("weather_code", 0) or 0
+            label, color = WEATHER_LABELS.get(code, ("?", "white"))
+            weather_str = f"[{color}]{label}[/{color}]"
+
+            # Temperature with color
+            temp = r.get("temperature", 0)
+            if settings.temperature_unit == "fahrenheit":
+                if temp >= 90:
+                    temp_str = f"[red]{temp:.0f}°{temp_symbol}[/red]"
+                elif temp >= 75:
+                    temp_str = f"[yellow]{temp:.0f}°{temp_symbol}[/yellow]"
+                elif temp <= 32:
+                    temp_str = f"[cyan]{temp:.0f}°{temp_symbol}[/cyan]"
+                else:
+                    temp_str = f"{temp:.0f}°{temp_symbol}"
+            else:
+                if temp >= 32:
+                    temp_str = f"[red]{temp:.0f}°{temp_symbol}[/red]"
+                elif temp >= 24:
+                    temp_str = f"[yellow]{temp:.0f}°{temp_symbol}[/yellow]"
+                elif temp <= 0:
+                    temp_str = f"[cyan]{temp:.0f}°{temp_symbol}[/cyan]"
+                else:
+                    temp_str = f"{temp:.0f}°{temp_symbol}"
+
+            feels = r.get("feels_like", 0)
+            feels_str = f"{feels:.0f}°{temp_symbol}"
+
+            wind = r.get("wind_speed", 0)
+            wind_str = f"{wind:.0f} {wind_symbol}"
+
+            humidity = r.get("humidity", 0)
+            humidity_str = f"{humidity}%"
+
+            table.add_row(
+                loc_str, temp_str, feels_str, weather_str, wind_str, humidity_str
+            )
+
+    console.print(table)
+
+    # Find extremes
+    valid = [r for r in results if "error" not in r]
+    if len(valid) >= 2:
+        temps = [(r["name"], r.get("temperature", 0)) for r in valid]
+        hottest = max(temps, key=lambda x: x[1])
+        coldest = min(temps, key=lambda x: x[1])
+        diff = hottest[1] - coldest[1]
+
+        console.print(
+            f"\n[dim]Warmest: {hottest[0]} ({hottest[1]:.0f}°{temp_symbol})[/dim]"
+        )
+        console.print(
+            f"[dim]Coolest: {coldest[0]} ({coldest[1]:.0f}°{temp_symbol})[/dim]"
+        )
+        console.print(f"[dim]Difference: {diff:.0f}°{temp_symbol}[/dim]")
+
+
+# =============================================================================
+# History command
+# =============================================================================
+
+
+@cli.command()
+@click.argument("location", required=False)
+@click.option(
+    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
+)
+@click.option(
+    "-y", "--years", default=1, help="How many years back to compare (default: 1)"
+)
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def history(location: str | None, country: str | None, years: int, as_json: bool):
+    """Compare today's weather with the same day in past years.
+
+    Shows how today compares to this day in previous years.
+
+    LOCATION can be a city name or a favorite alias (see 'raindrop fav list').
+    """
+    settings = get_settings()
+
+    # Resolve location (favorites, defaults)
+    try:
+        resolved_location, resolved_country = settings.resolve_location(location)
+    except ValueError:
+        raise click.ClickException(
+            "No location provided. Use 'raindrop history <location>' or set a default with 'raindrop config set location <name>'"
+        )
+
+    # CLI country flag overrides resolved country
+    if country is not None:
+        resolved_country = country
+
+    location = resolved_location
+    country = resolved_country
+
+    result = geocode(location, country)
+
+    temp_symbol = TEMP_SYMBOLS[settings.temperature_unit]
+    precip_symbol = settings.precipitation_unit
+
+    # Get today's date
+    today = datetime.now().date()
+    today_str = today.strftime("%Y-%m-%d")
+
+    # Get current weather
+    current_weather = om.forecast(
+        result.latitude,
+        result.longitude,
+        current=[
+            "temperature_2m",
+            "weather_code",
+        ],
+        daily=[
+            "temperature_2m_max",
+            "temperature_2m_min",
+            "precipitation_sum",
+            "weather_code",
+        ],
+        temperature_unit=settings.temperature_unit,
+        precipitation_unit=settings.precipitation_unit,
+        forecast_days=1,
+    )
+
+    # Get historical data for same day in past years
+    historical_data = []
+    for y in range(1, years + 1):
+        try:
+            past_date = today.replace(year=today.year - y)
+            past_str = past_date.strftime("%Y-%m-%d")
+
+            hist = om.historical(
+                result.latitude,
+                result.longitude,
+                start_date=past_str,
+                end_date=past_str,
+                daily=[
+                    "temperature_2m_max",
+                    "temperature_2m_min",
+                    "precipitation_sum",
+                    "weather_code",
+                ],
+                temperature_unit=settings.temperature_unit,
+                precipitation_unit=settings.precipitation_unit,
+            )
+
+            if "daily" in hist and hist["daily"].get("time"):
+                d = hist["daily"]
+                historical_data.append(
+                    {
+                        "year": today.year - y,
+                        "date": past_str,
+                        "temp_max": d.get("temperature_2m_max", [None])[0],
+                        "temp_min": d.get("temperature_2m_min", [None])[0],
+                        "precip": d.get("precipitation_sum", [None])[0],
+                        "weather_code": d.get("weather_code", [None])[0],
+                    }
+                )
+        except Exception:
+            # Skip years with missing data
+            pass
+
+    # Current day data
+    c = current_weather.current
+    d = current_weather.daily
+
+    current_data = {
+        "year": today.year,
+        "date": today_str,
+        "temp_max": d.temperature_2m_max[0] if d and d.temperature_2m_max else None,
+        "temp_min": d.temperature_2m_min[0] if d and d.temperature_2m_min else None,
+        "precip": d.precipitation_sum[0] if d and d.precipitation_sum else None,
+        "weather_code": d.weather_code[0] if d and d.weather_code else None,
+        "temp_current": c.temperature_2m if c else None,
+    }
+
+    # JSON output
+    if as_json:
+        data = {
+            "location": {
+                "name": result.name,
+                "admin1": result.admin1,
+                "country": result.country,
+                "latitude": result.latitude,
+                "longitude": result.longitude,
+            },
+            "today": current_data,
+            "historical": historical_data,
+            "units": {
+                "temperature": settings.temperature_unit,
+                "precipitation": settings.precipitation_unit,
+            },
+        }
+        click.echo(json_lib.dumps(data, indent=2))
+        return
+
+    # Display
+    console.print(
+        f"\n[bold cyan]{result.name}, {result.admin1}, {result.country}[/bold cyan]"
+    )
+    console.print(f"[dim]Historical comparison for {today.strftime('%B %d')}[/dim]\n")
+
+    # Table
+    table = Table(show_header=True, box=box.ROUNDED, header_style="bold")
+    table.add_column("Year", style="cyan", justify="right")
+    table.add_column("High", justify="right")
+    table.add_column("Low", justify="right")
+    table.add_column("Precip", justify="right")
+    table.add_column("Weather", justify="left")
+    table.add_column("vs Today", justify="right")
+
+    # Add current year first
+    code = current_data.get("weather_code", 0) or 0
+    label, color = WEATHER_LABELS.get(code, ("?", "white"))
+    table.add_row(
+        f"[bold yellow]{current_data['year']}[/bold yellow]",
+        f"{current_data['temp_max']:.0f}°{temp_symbol}"
+        if current_data["temp_max"]
+        else "—",
+        f"{current_data['temp_min']:.0f}°{temp_symbol}"
+        if current_data["temp_min"]
+        else "—",
+        f"{current_data['precip']:.1f} {precip_symbol}"
+        if current_data["precip"]
+        else "—",
+        f"[{color}]{label}[/{color}]",
+        "[bold]Today[/bold]",
+    )
+
+    # Add historical years
+    today_max = current_data.get("temp_max")
+    for h in historical_data:
+        code = h.get("weather_code", 0) or 0
+        label, color = WEATHER_LABELS.get(code, ("?", "white"))
+
+        # Calculate difference from today
+        if today_max is not None and h.get("temp_max") is not None:
+            diff = today_max - h["temp_max"]
+            if diff > 0:
+                diff_str = f"[red]+{diff:.0f}°[/red]"
+            elif diff < 0:
+                diff_str = f"[cyan]{diff:.0f}°[/cyan]"
+            else:
+                diff_str = "[dim]same[/dim]"
+        else:
+            diff_str = "—"
+
+        table.add_row(
+            str(h["year"]),
+            f"{h['temp_max']:.0f}°{temp_symbol}" if h.get("temp_max") else "—",
+            f"{h['temp_min']:.0f}°{temp_symbol}" if h.get("temp_min") else "—",
+            f"{h['precip']:.1f} {precip_symbol}" if h.get("precip") else "—",
+            f"[{color}]{label}[/{color}]",
+            diff_str,
+        )
+
+    console.print(table)
+
+    # Summary stats
+    if historical_data and today_max is not None:
+        hist_maxes = [
+            h["temp_max"] for h in historical_data if h.get("temp_max") is not None
+        ]
+        if hist_maxes:
+            avg_max = sum(hist_maxes) / len(hist_maxes)
+            diff_from_avg = today_max - avg_max
+            if diff_from_avg > 0:
+                console.print(
+                    f"\n[dim]Today is [red]{diff_from_avg:.1f}°{temp_symbol} warmer[/red] than average for this date[/dim]"
+                )
+            elif diff_from_avg < 0:
+                console.print(
+                    f"\n[dim]Today is [cyan]{abs(diff_from_avg):.1f}°{temp_symbol} cooler[/cyan] than average for this date[/dim]"
+                )
+            else:
+                console.print(
+                    f"\n[dim]Today matches the historical average for this date[/dim]"
+                )
+
+
 if __name__ == "__main__":
     cli()
