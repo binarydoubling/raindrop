@@ -871,6 +871,24 @@ class ForecastDiscussion:
     product_text: str
 
 
+@dataclass
+class WeatherAlert:
+    """NWS Weather Alert."""
+
+    id: str
+    event: str  # e.g., "Winter Storm Warning"
+    severity: str  # Minor, Moderate, Severe, Extreme, Unknown
+    certainty: str  # Observed, Likely, Possible, Unlikely, Unknown
+    urgency: str  # Immediate, Expected, Future, Past, Unknown
+    headline: str
+    description: str
+    instruction: str | None
+    onset: str | None  # ISO datetime
+    expires: str | None  # ISO datetime
+    sender_name: str
+    areas: list[str]  # Affected area names
+
+
 class NWSClient:
     """Client for NWS API (forecast discussions, alerts, etc.)."""
 
@@ -952,3 +970,67 @@ class NWSClient:
             issuance_time=product_data.get("issuanceTime", ""),
             product_text=product_data.get("productText", ""),
         )
+
+    def get_alerts(
+        self, latitude: float, longitude: float, *, active_only: bool = True
+    ) -> list[WeatherAlert]:
+        """Get weather alerts for a location."""
+        # Use point-based alerts endpoint
+        url = f"{self.base_url}/alerts"
+        params = [f"point={latitude},{longitude}"]
+        if active_only:
+            params.append("status=actual")
+        url = f"{url}?{'&'.join(params)}"
+
+        data = self._request(url)
+
+        alerts = []
+        features = data.get("features", [])
+        for feature in features:
+            props = feature.get("properties", {})
+            alerts.append(
+                WeatherAlert(
+                    id=props.get("id", ""),
+                    event=props.get("event", "Unknown"),
+                    severity=props.get("severity", "Unknown"),
+                    certainty=props.get("certainty", "Unknown"),
+                    urgency=props.get("urgency", "Unknown"),
+                    headline=props.get("headline", ""),
+                    description=props.get("description", ""),
+                    instruction=props.get("instruction"),
+                    onset=props.get("onset"),
+                    expires=props.get("expires"),
+                    sender_name=props.get("senderName", ""),
+                    areas=props.get("areaDesc", "").split("; "),
+                )
+            )
+
+        return alerts
+
+    def get_alerts_by_zone(self, zone_id: str) -> list[WeatherAlert]:
+        """Get alerts for a specific NWS zone."""
+        url = f"{self.base_url}/alerts/active/zone/{zone_id}"
+        data = self._request(url)
+
+        alerts = []
+        features = data.get("features", [])
+        for feature in features:
+            props = feature.get("properties", {})
+            alerts.append(
+                WeatherAlert(
+                    id=props.get("id", ""),
+                    event=props.get("event", "Unknown"),
+                    severity=props.get("severity", "Unknown"),
+                    certainty=props.get("certainty", "Unknown"),
+                    urgency=props.get("urgency", "Unknown"),
+                    headline=props.get("headline", ""),
+                    description=props.get("description", ""),
+                    instruction=props.get("instruction"),
+                    onset=props.get("onset"),
+                    expires=props.get("expires"),
+                    sender_name=props.get("senderName", ""),
+                    areas=props.get("areaDesc", "").split("; "),
+                )
+            )
+
+        return alerts
