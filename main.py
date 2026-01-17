@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import json as json_lib
 
 import click
 
@@ -75,6 +76,37 @@ def format_duration(td: timedelta) -> str:
         return f"{hours}h {minutes}m"
     else:
         return f"{minutes}m"
+
+
+# =============================================================================
+# Sparkline Functions
+# =============================================================================
+
+SPARK_CHARS = "▁▂▃▄▅▆▇█"
+
+
+def sparkline(values: list[float | int | None]) -> str:
+    """Generate a sparkline string from a list of values."""
+    clean_values = [v for v in values if v is not None]
+    if not clean_values:
+        return ""
+
+    min_val = min(clean_values)
+    max_val = max(clean_values)
+    val_range = max_val - min_val
+
+    result = []
+    for v in values:
+        if v is None:
+            result.append(" ")
+        elif val_range == 0:
+            result.append(SPARK_CHARS[3])
+        else:
+            idx = int((v - min_val) / val_range * 7)
+            idx = min(7, max(0, idx))
+            result.append(SPARK_CHARS[idx])
+
+    return "".join(result)
 
 
 # =============================================================================
@@ -308,6 +340,91 @@ def config_models():
 
 
 # =============================================================================
+# Favorites commands
+# =============================================================================
+
+
+@cli.group()
+def fav():
+    """Manage favorite locations."""
+    pass
+
+
+@fav.command("list")
+def fav_list():
+    """List all saved favorites."""
+    settings = get_settings()
+
+    if not settings.favorites:
+        console.print("[dim]No favorites saved yet.[/dim]")
+        console.print(
+            "[dim]Use 'raindrop fav add <alias> <location>' to add one.[/dim]"
+        )
+        return
+
+    table = Table(show_header=True, box=box.ROUNDED, header_style="bold")
+    table.add_column("Alias", style="cyan")
+    table.add_column("Location")
+    table.add_column("Country", style="dim")
+
+    for alias, fav in sorted(settings.favorites.items()):
+        table.add_row(alias, fav.name, fav.country_code or "—")
+
+    console.print(table)
+
+
+@fav.command("add")
+@click.argument("alias")
+@click.argument("location")
+@click.option(
+    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
+)
+def fav_add(alias: str, location: str, country: str | None):
+    """Add a favorite location.
+
+    \b
+    Examples:
+      raindrop fav add home "San Francisco"
+      raindrop fav add work "New York" -c US
+      raindrop fav add parents "Paris" -c FR
+    """
+    from settings import Favorite
+
+    settings = get_settings()
+
+    # Validate by attempting to geocode
+    try:
+        result = geocode(location, country)
+    except Exception as e:
+        raise click.ClickException(f"Could not find location: {e}")
+
+    settings.favorites[alias] = Favorite(
+        name=result.name,
+        country_code=country.upper() if country else None,
+    )
+    settings.save()
+
+    console.print(
+        f"[green]Added favorite '{alias}' -> {result.name}, {result.admin1}, {result.country}[/green]"
+    )
+
+
+@fav.command("remove")
+@click.argument("alias")
+def fav_remove(alias: str):
+    """Remove a favorite location."""
+    settings = get_settings()
+
+    if alias not in settings.favorites:
+        raise click.ClickException(f"Favorite '{alias}' not found")
+
+    del settings.favorites[alias]
+    settings.save()
+
+    console.print(f"[green]Removed favorite '{alias}'[/green]")
+
+
+# =============================================================================
 # Weather commands
 # =============================================================================
 
@@ -410,22 +527,37 @@ def format_precip_chance(chance: int, prev_chance: int) -> str:
     "-m",
     "--model",
     "model_name",
-    help="Weather model to use (see 'weather config models')",
+    help="Weather model to use (see 'raindrop config models')",
 )
-def current(location: str | None, country: str | None, model_name: str | None):
-    """Get current weather for a location."""
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+@click.option("--compact", is_flag=True, help="One-line output for shell prompts")
+def current(
+    location: str | None,
+    country: str | None,
+    model_name: str | None,
+    as_json: bool,
+    compact: bool,
+):
+    """Get current weather for a location.
+
+    LOCATION can be a city name or a favorite alias (see 'raindrop fav list').
+    """
     settings = get_settings()
 
-    # Use defaults from settings if not provided
-    if location is None:
-        location = settings.location
-    if location is None:
+    # Resolve location (favorites, defaults)
+    try:
+        resolved_location, resolved_country = settings.resolve_location(location)
+    except ValueError:
         raise click.ClickException(
-            "No location provided. Use 'weather current <location>' or set a default with 'weather config set location <name>'"
+            "No location provided. Use 'raindrop current <location>' or set a default with 'raindrop config set location <name>'"
         )
 
-    if country is None:
-        country = settings.country_code
+    # CLI country flag overrides resolved country
+    if country is not None:
+        resolved_country = country
+
+    location = resolved_location
+    country = resolved_country
 
     # Resolve model (CLI flag > settings > auto)
     model_key = model_name or settings.model
@@ -470,6 +602,64 @@ def current(location: str | None, country: str | None, model_name: str | None):
 
     temp_symbol = TEMP_SYMBOLS[settings.temperature_unit]
     wind_symbol = WIND_SYMBOLS[settings.wind_speed_unit]
+
+    # JSON output
+    if as_json:
+        data = {
+            "location": {
+                "name": result.name,
+                "admin1": result.admin1,
+                "country": result.country,
+                "latitude": result.latitude,
+                "longitude": result.longitude,
+            },
+            "elevation": weather.elevation,
+            "timezone": weather.timezone,
+            "model": model_key or "auto",
+            "current": {
+                "time": c.time,
+                "temperature": c.temperature_2m,
+                "apparent_temperature": c.apparent_temperature,
+                "humidity": c.relative_humidity_2m,
+                "dew_point": c.dew_point_2m,
+                "cloud_cover": c.cloud_cover,
+                "wind_speed": c.wind_speed_10m,
+                "wind_direction": c.wind_direction_10m,
+                "wind_gusts": c.wind_gusts_10m,
+                "pressure_msl": c.pressure_msl,
+                "surface_pressure": c.surface_pressure,
+                "visibility": c.visibility,
+                "uv_index": c.uv_index,
+                "weather_code": c.weather_code,
+                "weather_description": WEATHER_CODES.get(
+                    c.weather_code or 0, "Unknown"
+                ),
+                "is_day": c.is_day,
+            },
+            "daily": {
+                "sunrise": d.sunrise[0] if d and d.sunrise else None,
+                "sunset": d.sunset[0] if d and d.sunset else None,
+                "uv_index_max": d.uv_index_max[0] if d and d.uv_index_max else None,
+            },
+            "units": {
+                "temperature": settings.temperature_unit,
+                "wind_speed": settings.wind_speed_unit,
+                "precipitation": settings.precipitation_unit,
+            },
+        }
+        click.echo(json_lib.dumps(data, indent=2))
+        return
+
+    # Compact one-liner output
+    if compact:
+        code = c.weather_code or 0
+        condition = WEATHER_CODES.get(code, "Unknown")
+        click.echo(
+            f"{result.name}: {c.temperature_2m:.0f}°{temp_symbol} {condition} | "
+            f"Wind {c.wind_speed_10m:.0f} {wind_symbol} | "
+            f"Humidity {c.relative_humidity_2m}%"
+        )
+        return
 
     # Parse times
     now = datetime.fromisoformat(c.time)
@@ -606,24 +796,38 @@ def current(location: str | None, country: str | None, model_name: str | None):
     "-m",
     "--model",
     "model_name",
-    help="Weather model to use (see 'weather config models')",
+    help="Weather model to use (see 'raindrop config models')",
 )
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+@click.option("--spark", is_flag=True, help="Show sparkline summary")
 def hourly(
-    location: str | None, country: str | None, hours: int, model_name: str | None
+    location: str | None,
+    country: str | None,
+    hours: int,
+    model_name: str | None,
+    as_json: bool,
+    spark: bool,
 ):
-    """Show hourly forecast with deltas."""
+    """Show hourly forecast with deltas.
+
+    LOCATION can be a city name or a favorite alias (see 'raindrop fav list').
+    """
     settings = get_settings()
 
-    # Use defaults from settings if not provided
-    if location is None:
-        location = settings.location
-    if location is None:
+    # Resolve location (favorites, defaults)
+    try:
+        resolved_location, resolved_country = settings.resolve_location(location)
+    except ValueError:
         raise click.ClickException(
-            "No location provided. Use 'weather hourly <location>' or set a default with 'weather config set location <name>'"
+            "No location provided. Use 'raindrop hourly <location>' or set a default with 'raindrop config set location <name>'"
         )
 
-    if country is None:
-        country = settings.country_code
+    # CLI country flag overrides resolved country
+    if country is not None:
+        resolved_country = country
+
+    location = resolved_location
+    country = resolved_country
 
     # Resolve model (CLI flag > settings > auto)
     model_key = model_name or settings.model
@@ -670,6 +874,96 @@ def hourly(
                 start_idx = i
                 break
 
+    # Get data arrays (with None safety)
+    temps = h.temperature_2m or []
+    feels = h.apparent_temperature or []
+    precip_probs = h.precipitation_probability or []
+    codes = h.weather_code or []
+    winds = h.wind_speed_10m or []
+    humidities = h.relative_humidity_2m or []
+
+    # JSON output
+    if as_json:
+        hourly_data = []
+        for i in range(start_idx, min(start_idx + hours, len(h.time))):
+            code = codes[i] if i < len(codes) else 0
+            hourly_data.append(
+                {
+                    "time": h.time[i],
+                    "temperature": temps[i] if i < len(temps) else None,
+                    "apparent_temperature": feels[i] if i < len(feels) else None,
+                    "precipitation_probability": precip_probs[i]
+                    if i < len(precip_probs)
+                    else None,
+                    "weather_code": code,
+                    "weather_description": WEATHER_CODES.get(code, "Unknown"),
+                    "wind_speed": winds[i] if i < len(winds) else None,
+                    "humidity": humidities[i] if i < len(humidities) else None,
+                }
+            )
+
+        data = {
+            "location": {
+                "name": result.name,
+                "admin1": result.admin1,
+                "country": result.country,
+                "latitude": result.latitude,
+                "longitude": result.longitude,
+            },
+            "model": model_key or "auto",
+            "hours": hourly_data,
+            "units": {
+                "temperature": settings.temperature_unit,
+                "wind_speed": settings.wind_speed_unit,
+                "precipitation": settings.precipitation_unit,
+            },
+        }
+        click.echo(json_lib.dumps(data, indent=2))
+        return
+
+    # Sparkline output
+    if spark:
+        temp_vals = [
+            temps[i] if i < len(temps) else None
+            for i in range(start_idx, min(start_idx + hours, len(h.time)))
+        ]
+        precip_vals = [
+            precip_probs[i] if i < len(precip_probs) else None
+            for i in range(start_idx, min(start_idx + hours, len(h.time)))
+        ]
+        wind_vals = [
+            winds[i] if i < len(winds) else None
+            for i in range(start_idx, min(start_idx + hours, len(h.time)))
+        ]
+
+        temp_clean = [t for t in temp_vals if t is not None]
+        wind_clean = [w for w in wind_vals if w is not None]
+        precip_clean = [p for p in precip_vals if p is not None]
+
+        temp_range = (
+            f"{min(temp_clean):.0f}-{max(temp_clean):.0f}°{temp_symbol}"
+            if temp_clean
+            else "—"
+        )
+        wind_range = (
+            f"{min(wind_clean):.0f}-{max(wind_clean):.0f} {wind_symbol}"
+            if wind_clean
+            else "—"
+        )
+        precip_max = (
+            f"{max(precip_clean):.0f}%"
+            if precip_clean and max(precip_clean) > 0
+            else "—"
+        )
+
+        console.print(
+            f"\n[bold cyan]{result.name}[/bold cyan] [dim]Next {hours}h[/dim]\n"
+        )
+        console.print(f"[dim]Temp[/dim]   {sparkline(temp_vals)}  {temp_range}")
+        console.print(f"[dim]Precip[/dim] {sparkline(precip_vals)}  {precip_max}")
+        console.print(f"[dim]Wind[/dim]   {sparkline(wind_vals)}  {wind_range}")
+        return
+
     # Location header
     console.print(f"\n[bold cyan]{result.name}, {result.admin1}[/bold cyan]")
     console.print(f"[dim]Next {hours} hours[/dim]\n")
@@ -683,14 +977,6 @@ def hourly(
     table.add_column("Precip", justify="right")
     table.add_column(f"Wind ({wind_symbol})", justify="right")
     table.add_column("Humidity", justify="right")
-
-    # Get data arrays (with None safety)
-    temps = h.temperature_2m or []
-    feels = h.apparent_temperature or []
-    precip_probs = h.precipitation_probability or []
-    codes = h.weather_code or []
-    winds = h.wind_speed_10m or []
-    humidities = h.relative_humidity_2m or []
 
     for i in range(start_idx, min(start_idx + hours, len(h.time))):
         time_str = h.time[i]
@@ -760,22 +1046,36 @@ def hourly(
     "-m",
     "--model",
     "model_name",
-    help="Weather model to use (see 'weather config models')",
+    help="Weather model to use (see 'raindrop config models')",
 )
-def daily(location: str | None, country: str | None, days: int, model_name: str | None):
-    """Show daily forecast with technical analysis indicators."""
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def daily(
+    location: str | None,
+    country: str | None,
+    days: int,
+    model_name: str | None,
+    as_json: bool,
+):
+    """Show daily forecast with technical analysis indicators.
+
+    LOCATION can be a city name or a favorite alias (see 'raindrop fav list').
+    """
     settings = get_settings()
 
-    # Use defaults from settings if not provided
-    if location is None:
-        location = settings.location
-    if location is None:
+    # Resolve location (favorites, defaults)
+    try:
+        resolved_location, resolved_country = settings.resolve_location(location)
+    except ValueError:
         raise click.ClickException(
-            "No location provided. Use 'weather daily <location>' or set a default with 'weather config set location <name>'"
+            "No location provided. Use 'raindrop daily <location>' or set a default with 'raindrop config set location <name>'"
         )
 
-    if country is None:
-        country = settings.country_code
+    # CLI country flag overrides resolved country
+    if country is not None:
+        resolved_country = country
+
+    location = resolved_location
+    country = resolved_country
 
     # Resolve model (CLI flag > settings > auto)
     model_key = model_name or settings.model
@@ -829,6 +1129,63 @@ def daily(location: str | None, country: str | None, days: int, model_name: str 
     ema_7 = ema(avg_temps, 7)  # Long-term EMA
     roc_vals = calc_roc(avg_temps, 3)  # 3-day rate of change
     volatility = calc_volatility(highs, lows)
+    wind_gusts = d.wind_gusts_10m_max or []
+
+    # JSON output
+    if as_json:
+        daily_data = []
+        for i in range(min(len(times), days)):
+            code = codes[i] if i < len(codes) else 0
+            ema_s = ema_3[i] if i < len(ema_3) else None
+            ema_l = ema_7[i] if i < len(ema_7) else None
+            trend_txt, _ = trend_signal(avg_temps[i], ema_s, ema_l)
+            roc = roc_vals[i] if i < len(roc_vals) else None
+
+            daily_data.append(
+                {
+                    "date": times[i],
+                    "temperature_max": highs[i] if i < len(highs) else None,
+                    "temperature_min": lows[i] if i < len(lows) else None,
+                    "temperature_avg": avg_temps[i] if i < len(avg_temps) else None,
+                    "weather_code": code,
+                    "weather_description": WEATHER_CODES.get(code, "Unknown"),
+                    "precipitation_probability": precip_probs[i]
+                    if i < len(precip_probs)
+                    else None,
+                    "precipitation_sum": precip_sums[i]
+                    if i < len(precip_sums)
+                    else None,
+                    "wind_speed_max": wind_maxs[i] if i < len(wind_maxs) else None,
+                    "wind_gusts_max": wind_gusts[i] if i < len(wind_gusts) else None,
+                    "uv_index_max": uv_maxs[i] if i < len(uv_maxs) else None,
+                    "analysis": {
+                        "ema_3": ema_s,
+                        "ema_7": ema_l,
+                        "trend": trend_txt,
+                        "rate_of_change_3d": roc,
+                        "daily_range": volatility[i] if i < len(volatility) else None,
+                    },
+                }
+            )
+
+        data = {
+            "location": {
+                "name": result.name,
+                "admin1": result.admin1,
+                "country": result.country,
+                "latitude": result.latitude,
+                "longitude": result.longitude,
+            },
+            "model": model_key or "auto",
+            "days": daily_data,
+            "units": {
+                "temperature": settings.temperature_unit,
+                "wind_speed": settings.wind_speed_unit,
+                "precipitation": settings.precipitation_unit,
+            },
+        }
+        click.echo(json_lib.dumps(data, indent=2))
+        return
 
     # Location header
     console.print(

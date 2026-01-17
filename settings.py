@@ -1,7 +1,7 @@
 """Persistent settings management for raindrop."""
 
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 from open_meteo import TemperatureUnit, WindSpeedUnit, PrecipitationUnit
@@ -9,6 +9,14 @@ from open_meteo import TemperatureUnit, WindSpeedUnit, PrecipitationUnit
 
 CONFIG_DIR = Path.home() / ".config" / "raindrop"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+
+
+@dataclass
+class Favorite:
+    """A saved location."""
+
+    name: str
+    country_code: str | None = None
 
 
 # Available weather models (from Open-Meteo docs)
@@ -55,10 +63,14 @@ class Settings:
     # Weather model
     model: str | None = None  # None = let Open-Meteo auto-select
 
+    # Favorites (alias -> Favorite)
+    favorites: dict[str, Favorite] = field(default_factory=dict)
+
     def save(self) -> None:
         """Save settings to config file."""
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        CONFIG_FILE.write_text(json.dumps(asdict(self), indent=2))
+        data = asdict(self)
+        CONFIG_FILE.write_text(json.dumps(data, indent=2))
 
     @classmethod
     def load(cls) -> "Settings":
@@ -68,6 +80,15 @@ class Settings:
 
         try:
             data = json.loads(CONFIG_FILE.read_text())
+            # Parse favorites back into Favorite objects
+            favorites_data = data.get("favorites", {})
+            favorites = {
+                alias: Favorite(
+                    name=fav["name"],
+                    country_code=fav.get("country_code"),
+                )
+                for alias, fav in favorites_data.items()
+            }
             return cls(
                 location=data.get("location"),
                 country_code=data.get("country_code"),
@@ -75,9 +96,28 @@ class Settings:
                 wind_speed_unit=data.get("wind_speed_unit", "mph"),
                 precipitation_unit=data.get("precipitation_unit", "mm"),
                 model=data.get("model"),
+                favorites=favorites,
             )
         except (json.JSONDecodeError, KeyError):
             return cls()
+
+    def resolve_location(self, location: str | None) -> tuple[str, str | None]:
+        """
+        Resolve a location string, checking favorites first.
+        Returns (location_name, country_code).
+        """
+        if location is None:
+            # Use default location
+            if self.location is None:
+                raise ValueError("No location provided and no default set")
+            return self.location, self.country_code
+
+        # Check if it's a favorite alias
+        if location in self.favorites:
+            fav = self.favorites[location]
+            return fav.name, fav.country_code
+
+        return location, None
 
 
 def get_settings() -> Settings:
