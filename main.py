@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import click
 
@@ -16,6 +16,65 @@ console = Console()
 def geocode(location: str, country: str | None = None) -> GeocodingResult:
     results = om.geocode(location, country_code=country)
     return results[0]
+
+
+def deg_to_compass(deg: int) -> str:
+    """Convert degrees to compass direction."""
+    directions = [
+        "N",
+        "NNE",
+        "NE",
+        "ENE",
+        "E",
+        "ESE",
+        "SE",
+        "SSE",
+        "S",
+        "SSW",
+        "SW",
+        "WSW",
+        "W",
+        "WNW",
+        "NW",
+        "NNW",
+    ]
+    idx = round(deg / 22.5) % 16
+    return directions[idx]
+
+
+def format_visibility(meters: float) -> str:
+    """Format visibility in human-readable form."""
+    if meters >= 10000:
+        return f"{meters / 1000:.0f} km"
+    elif meters >= 1000:
+        return f"{meters / 1000:.1f} km"
+    else:
+        return f"{meters:.0f} m"
+
+
+def format_uv(uv: float) -> str:
+    """Format UV index with risk level."""
+    if uv < 3:
+        return f"{uv:.1f} [green](Low)[/green]"
+    elif uv < 6:
+        return f"{uv:.1f} [yellow](Moderate)[/yellow]"
+    elif uv < 8:
+        return f"{uv:.1f} [orange1](High)[/orange1]"
+    elif uv < 11:
+        return f"{uv:.1f} [red](Very High)[/red]"
+    else:
+        return f"{uv:.1f} [magenta](Extreme)[/magenta]"
+
+
+def format_duration(td: timedelta) -> str:
+    """Format a timedelta as human readable."""
+    total_seconds = int(td.total_seconds())
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, _ = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours}h {minutes}m"
+    else:
+        return f"{minutes}m"
 
 
 @click.group()
@@ -291,43 +350,159 @@ def current(location: str | None, country: str | None, model_name: str | None):
             "temperature_2m",
             "apparent_temperature",
             "relative_humidity_2m",
+            "dew_point_2m",
             "cloud_cover",
             "wind_speed_10m",
+            "wind_direction_10m",
             "wind_gusts_10m",
+            "pressure_msl",
+            "surface_pressure",
+            "visibility",
+            "uv_index",
             "weather_code",
             "is_day",
+        ],
+        daily=[
+            "sunrise",
+            "sunset",
+            "uv_index_max",
         ],
         temperature_unit=settings.temperature_unit,
         wind_speed_unit=settings.wind_speed_unit,
         models=models,
+        forecast_days=1,
     )
     c = weather.current
+    d = weather.daily
     if c is None:
         raise click.ClickException("No current weather data returned")
 
     temp_symbol = TEMP_SYMBOLS[settings.temperature_unit]
     wind_symbol = WIND_SYMBOLS[settings.wind_speed_unit]
 
+    # Parse times
+    now = datetime.fromisoformat(c.time)
+    sunrise = datetime.fromisoformat(d.sunrise[0]) if d and d.sunrise else None
+    sunset = datetime.fromisoformat(d.sunset[0]) if d and d.sunset else None
+
     # Location header
-    console.print(f"\n[bold cyan]{result.name}, {result.admin1}[/bold cyan]")
+    console.print(
+        f"\n[bold cyan]{result.name}, {result.admin1}, {result.country}[/bold cyan]"
+    )
 
-    # Weather condition
-    condition = WEATHER_CODES.get(c.weather_code or 0, "Unknown")
-    console.print(f"[dim]{condition}[/dim]\n")
+    # Coordinates and metadata
+    lat_dir = "N" if result.latitude >= 0 else "S"
+    lon_dir = "E" if result.longitude >= 0 else "W"
+    console.print(
+        f"[dim]{abs(result.latitude):.4f}°{lat_dir} {abs(result.longitude):.4f}°{lon_dir} · "
+        f"Elev {weather.elevation:.0f}m · {weather.timezone}[/dim]"
+    )
 
-    # Main stats table
-    table = Table(show_header=False, box=None, padding=(0, 2))
+    # Weather condition with WMO code
+    code = c.weather_code or 0
+    condition = WEATHER_CODES.get(code, "Unknown")
+    is_day_str = "Day" if c.is_day else "Night"
+    console.print(f"[dim]WMO {code}: {condition} ({is_day_str})[/dim]")
+
+    # Model info
+    model_display = model_key or "auto"
+    console.print(f"[dim]Model: {model_display}[/dim]\n")
+
+    # Main conditions table
+    table = Table(show_header=False, box=box.ROUNDED, padding=(0, 2))
     table.add_column("label", style="dim")
     table.add_column("value", style="bold")
+    table.add_column("label2", style="dim")
+    table.add_column("value2", style="bold")
 
-    table.add_row("Temperature", f"{c.temperature_2m}°{temp_symbol}")
-    table.add_row("Feels like", f"{c.apparent_temperature}°{temp_symbol}")
-    table.add_row("Humidity", f"{c.relative_humidity_2m}%")
-    table.add_row("Cloud cover", f"{c.cloud_cover}%")
-    table.add_row("Wind", f"{c.wind_speed_10m} {wind_symbol}")
-    table.add_row("Gusts", f"{c.wind_gusts_10m} {wind_symbol}")
+    # Row 1: Temperature / Feels like
+    table.add_row(
+        "Temperature",
+        f"{c.temperature_2m}°{temp_symbol}",
+        "Feels like",
+        f"{c.apparent_temperature}°{temp_symbol}",
+    )
+
+    # Row 2: Humidity / Dew point
+    table.add_row(
+        "Humidity",
+        f"{c.relative_humidity_2m}%",
+        "Dew point",
+        f"{c.dew_point_2m}°{temp_symbol}" if c.dew_point_2m else "—",
+    )
+
+    # Row 3: Wind speed + direction / Gusts
+    wind_dir = c.wind_direction_10m
+    if wind_dir is not None:
+        compass = deg_to_compass(wind_dir)
+        wind_str = f"{c.wind_speed_10m} {wind_symbol} {compass} ({wind_dir}°)"
+    else:
+        wind_str = f"{c.wind_speed_10m} {wind_symbol}"
+    table.add_row(
+        "Wind",
+        wind_str,
+        "Gusts",
+        f"{c.wind_gusts_10m} {wind_symbol}",
+    )
+
+    # Row 4: Pressure (MSL) / Surface pressure
+    table.add_row(
+        "Pressure (MSL)",
+        f"{c.pressure_msl} hPa" if c.pressure_msl else "—",
+        "Surface",
+        f"{c.surface_pressure} hPa" if c.surface_pressure else "—",
+    )
+
+    # Row 5: Visibility / Cloud cover
+    visibility_str = format_visibility(c.visibility) if c.visibility else "—"
+    table.add_row(
+        "Visibility",
+        visibility_str,
+        "Cloud cover",
+        f"{c.cloud_cover}%",
+    )
+
+    # Row 6: UV Index / UV Max today
+    uv_str = format_uv(c.uv_index) if c.uv_index is not None else "—"
+    uv_max = d.uv_index_max[0] if d and d.uv_index_max else None
+    uv_max_str = format_uv(uv_max) if uv_max is not None else "—"
+    table.add_row(
+        "UV Index",
+        uv_str,
+        "UV Max today",
+        uv_max_str,
+    )
 
     console.print(table)
+
+    # Sun info
+    if sunrise and sunset:
+        console.print()
+        sun_table = Table(show_header=False, box=None, padding=(0, 2))
+        sun_table.add_column("label", style="dim")
+        sun_table.add_column("value", style="bold")
+        sun_table.add_column("label2", style="dim")
+        sun_table.add_column("value2", style="bold")
+
+        sunrise_str = sunrise.strftime("%-I:%M %p").lower()
+        sunset_str = sunset.strftime("%-I:%M %p").lower()
+
+        # Calculate time until/since sunrise/sunset
+        if now < sunrise:
+            sun_status = f"[cyan]Sunrise in {format_duration(sunrise - now)}[/cyan]"
+        elif now < sunset:
+            sun_status = f"[yellow]Sunset in {format_duration(sunset - now)}[/yellow]"
+        else:
+            sun_status = f"[dim]Sun set {format_duration(now - sunset)} ago[/dim]"
+
+        sun_table.add_row(
+            "Sunrise",
+            sunrise_str,
+            "Sunset",
+            sunset_str,
+        )
+        console.print(sun_table)
+        console.print(sun_status)
 
 
 @cli.command()

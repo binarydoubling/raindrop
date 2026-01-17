@@ -170,6 +170,7 @@ class CurrentWeather:
     temperature_2m: float | None = None
     relative_humidity_2m: int | None = None
     apparent_temperature: float | None = None
+    dew_point_2m: float | None = None
     is_day: bool | None = None
     precipitation: float | None = None
     rain: float | None = None
@@ -182,6 +183,8 @@ class CurrentWeather:
     wind_speed_10m: float | None = None
     wind_direction_10m: int | None = None
     wind_gusts_10m: float | None = None
+    visibility: float | None = None
+    uv_index: float | None = None
 
 
 @dataclass
@@ -483,6 +486,7 @@ class OpenMeteo:
                 temperature_2m=c.get("temperature_2m"),
                 relative_humidity_2m=c.get("relative_humidity_2m"),
                 apparent_temperature=c.get("apparent_temperature"),
+                dew_point_2m=c.get("dew_point_2m"),
                 is_day=bool(c["is_day"]) if "is_day" in c else None,
                 precipitation=c.get("precipitation"),
                 rain=c.get("rain"),
@@ -495,6 +499,8 @@ class OpenMeteo:
                 wind_speed_10m=c.get("wind_speed_10m"),
                 wind_direction_10m=c.get("wind_direction_10m"),
                 wind_gusts_10m=c.get("wind_gusts_10m"),
+                visibility=c.get("visibility"),
+                uv_index=c.get("uv_index"),
             )
 
         # Parse hourly forecast
