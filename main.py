@@ -7,10 +7,11 @@ from rich.console import Console
 from rich.table import Table
 from rich import box
 
-from open_meteo import OpenMeteo, GeocodingResult
+from open_meteo import OpenMeteo, GeocodingResult, NWSClient
 from settings import get_settings, AVAILABLE_MODELS
 
 om = OpenMeteo()
+nws = NWSClient()
 console = Console()
 
 
@@ -1350,6 +1351,585 @@ def daily(
         "\n[dim]Trend: EMA(3)/EMA(7) crossover · Δ3d: 3-day temperature change[/dim]"
     )
     console.print("[dim]▲ Hot · ↗ Warming · → Stable · ↘ Cooling · ▼ Cold[/dim]")
+
+
+# =============================================================================
+# Air Quality command
+# =============================================================================
+
+# US AQI levels and colors
+US_AQI_LEVELS = [
+    (50, "Good", "green"),
+    (100, "Moderate", "yellow"),
+    (150, "Unhealthy (Sensitive)", "orange1"),
+    (200, "Unhealthy", "red"),
+    (300, "Very Unhealthy", "magenta"),
+    (500, "Hazardous", "bold red"),
+]
+
+
+def format_us_aqi(aqi: int | None) -> str:
+    """Format US AQI with level and color."""
+    if aqi is None:
+        return "—"
+    for threshold, level, color in US_AQI_LEVELS:
+        if aqi <= threshold:
+            return f"[{color}]{aqi} ({level})[/{color}]"
+    return f"[bold red]{aqi} (Hazardous)[/bold red]"
+
+
+def format_pollutant(value: float | None, unit: str = "μg/m³") -> str:
+    """Format a pollutant value."""
+    if value is None:
+        return "—"
+    return f"{value:.1f} {unit}"
+
+
+@cli.command()
+@click.argument("location", required=False)
+@click.option(
+    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
+)
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def aqi(location: str | None, country: str | None, as_json: bool):
+    """Show air quality index and pollutants.
+
+    LOCATION can be a city name or a favorite alias (see 'raindrop fav list').
+    """
+    settings = get_settings()
+
+    # Resolve location (favorites, defaults)
+    try:
+        resolved_location, resolved_country = settings.resolve_location(location)
+    except ValueError:
+        raise click.ClickException(
+            "No location provided. Use 'raindrop aqi <location>' or set a default with 'raindrop config set location <name>'"
+        )
+
+    # CLI country flag overrides resolved country
+    if country is not None:
+        resolved_country = country
+
+    location = resolved_location
+    country = resolved_country
+
+    result = geocode(location, country)
+
+    aq = om.air_quality(
+        result.latitude,
+        result.longitude,
+        current=[
+            "us_aqi",
+            "european_aqi",
+            "pm10",
+            "pm2_5",
+            "carbon_monoxide",
+            "nitrogen_dioxide",
+            "sulphur_dioxide",
+            "ozone",
+            "dust",
+            "uv_index",
+        ],
+        hourly=[
+            "us_aqi",
+            "pm2_5",
+            "pm10",
+        ],
+        forecast_days=2,
+    )
+
+    c = aq.current
+    h = aq.hourly
+    if c is None:
+        raise click.ClickException("No air quality data returned")
+
+    # JSON output
+    if as_json:
+        data = {
+            "location": {
+                "name": result.name,
+                "admin1": result.admin1,
+                "country": result.country,
+                "latitude": result.latitude,
+                "longitude": result.longitude,
+            },
+            "current": {
+                "time": c.time,
+                "us_aqi": c.us_aqi,
+                "european_aqi": c.european_aqi,
+                "pm10": c.pm10,
+                "pm2_5": c.pm2_5,
+                "carbon_monoxide": c.carbon_monoxide,
+                "nitrogen_dioxide": c.nitrogen_dioxide,
+                "sulphur_dioxide": c.sulphur_dioxide,
+                "ozone": c.ozone,
+                "dust": c.dust,
+                "uv_index": c.uv_index,
+            },
+        }
+        click.echo(json_lib.dumps(data, indent=2))
+        return
+
+    # Location header
+    console.print(
+        f"\n[bold cyan]{result.name}, {result.admin1}, {result.country}[/bold cyan]"
+    )
+    console.print(f"[dim]Air Quality Index[/dim]\n")
+
+    # Main AQI display
+    console.print(f"[bold]US AQI:[/bold] {format_us_aqi(c.us_aqi)}")
+    if c.european_aqi is not None:
+        console.print(f"[dim]European AQI: {c.european_aqi}[/dim]")
+    console.print()
+
+    # Pollutants table
+    table = Table(show_header=True, box=box.ROUNDED, header_style="bold")
+    table.add_column("Pollutant", style="dim")
+    table.add_column("Value", justify="right")
+
+    table.add_row("PM2.5", format_pollutant(c.pm2_5))
+    table.add_row("PM10", format_pollutant(c.pm10))
+    table.add_row("Ozone (O₃)", format_pollutant(c.ozone))
+    table.add_row("Nitrogen Dioxide (NO₂)", format_pollutant(c.nitrogen_dioxide))
+    table.add_row("Sulphur Dioxide (SO₂)", format_pollutant(c.sulphur_dioxide))
+    table.add_row("Carbon Monoxide (CO)", format_pollutant(c.carbon_monoxide))
+    if c.dust is not None and c.dust > 0:
+        table.add_row("Dust", format_pollutant(c.dust))
+    if c.uv_index is not None:
+        table.add_row("UV Index", format_uv(c.uv_index))
+
+    console.print(table)
+
+    # Hourly sparkline if available
+    if h and h.us_aqi:
+        # Find current hour index
+        now = datetime.now()
+        current_hour_str = now.strftime("%Y-%m-%dT%H:00")
+        try:
+            start_idx = h.time.index(current_hour_str)
+        except ValueError:
+            start_idx = 0
+
+        # Get next 24 hours of AQI
+        aqi_vals = h.us_aqi[start_idx : start_idx + 24]
+        if aqi_vals:
+            console.print(f"\n[dim]Next 24h AQI:[/dim] {sparkline(aqi_vals)}")
+            aqi_clean = [a for a in aqi_vals if a is not None]
+            if aqi_clean:
+                console.print(f"[dim]Range: {min(aqi_clean)}-{max(aqi_clean)}[/dim]")
+
+    # Legend
+    console.print(
+        "\n[dim]US AQI: 0-50 Good · 51-100 Moderate · 101-150 Sensitive · 151-200 Unhealthy · 201+ Very Unhealthy[/dim]"
+    )
+
+
+# =============================================================================
+# NWS Forecast Discussion command
+# =============================================================================
+
+
+def format_discussion(text: str) -> str:
+    """Format NWS forecast discussion text for pretty printing."""
+    import re
+
+    lines = text.strip().split("\n")
+    formatted_lines = []
+
+    for line in lines:
+        # Skip header lines (first few lines with codes)
+        if line.startswith("000") or line.startswith("FX") or line.startswith("AFD"):
+            continue
+
+        # Section headers start with . and end with ...
+        if line.startswith(".") and "..." in line:
+            section_match = re.match(r"\.([A-Z][A-Z\s/]+)\.\.\.", line)
+            if section_match:
+                current_section = section_match.group(1).strip()
+                formatted_lines.append(f"\n[bold cyan]{current_section}[/bold cyan]")
+                # Get any text after the ...
+                after = line.split("...")[-1].strip()
+                if after:
+                    formatted_lines.append(after)
+                continue
+
+        # Key messages header
+        if "KEY MESSAGES" in line:
+            formatted_lines.append(f"\n[bold yellow]KEY MESSAGES[/bold yellow]")
+            continue
+
+        # Issued/Updated timestamps
+        if line.strip().startswith("Issued at") or line.strip().startswith(
+            "Updated at"
+        ):
+            formatted_lines.append(f"[dim]{line.strip()}[/dim]")
+            continue
+
+        # Skip && separators
+        if line.strip() == "&&":
+            continue
+
+        # Skip $$ end markers
+        if line.strip() == "$$":
+            break
+
+        # Bullet points (lines starting with -)
+        if line.strip().startswith("-"):
+            formatted_lines.append(f"  [yellow]*[/yellow]{line.strip()[1:]}")
+            continue
+
+        # Regular content
+        if line.strip():
+            formatted_lines.append(line)
+
+    return "\n".join(formatted_lines)
+
+
+@cli.command()
+@click.argument("location", required=False)
+@click.option(
+    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
+)
+@click.option("--raw", is_flag=True, help="Show raw unformatted text")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def discussion(location: str | None, country: str | None, raw: bool, as_json: bool):
+    """Show NWS Area Forecast Discussion.
+
+    Displays the meteorologist's technical forecast discussion from the
+    National Weather Service. Only available for US locations.
+
+    LOCATION can be a city name or a favorite alias (see 'raindrop fav list').
+    """
+    settings = get_settings()
+
+    # Resolve location (favorites, defaults)
+    try:
+        resolved_location, resolved_country = settings.resolve_location(location)
+    except ValueError:
+        raise click.ClickException(
+            "No location provided. Use 'raindrop discussion <location>' or set a default with 'raindrop config set location <name>'"
+        )
+
+    # CLI country flag overrides resolved country
+    if country is not None:
+        resolved_country = country
+
+    location = resolved_location
+    country = resolved_country
+
+    result = geocode(location, country)
+
+    # Check if in US
+    if result.country_code != "US":
+        raise click.ClickException(
+            f"NWS forecast discussions are only available for US locations. "
+            f"{result.name} is in {result.country}."
+        )
+
+    # Get NWS office and discussion
+    try:
+        office = nws.get_office_for_point(result.latitude, result.longitude)
+        disc = nws.get_latest_discussion(office.id)
+    except Exception as e:
+        raise click.ClickException(f"Could not fetch NWS discussion: {e}")
+
+    # Parse issuance time
+    from datetime import datetime as dt
+
+    try:
+        issued = dt.fromisoformat(disc.issuance_time.replace("Z", "+00:00"))
+        issued_str = issued.strftime("%B %d, %Y at %-I:%M %p %Z")
+    except Exception:
+        issued_str = disc.issuance_time
+
+    # JSON output
+    if as_json:
+        data = {
+            "location": {
+                "name": result.name,
+                "admin1": result.admin1,
+                "country": result.country,
+                "latitude": result.latitude,
+                "longitude": result.longitude,
+            },
+            "office": {
+                "id": office.id,
+                "name": office.name,
+            },
+            "discussion": {
+                "id": disc.id,
+                "issuance_time": disc.issuance_time,
+                "text": disc.product_text,
+            },
+        }
+        click.echo(json_lib.dumps(data, indent=2))
+        return
+
+    # Header
+    console.print(f"\n[bold cyan]{result.name}, {result.admin1}[/bold cyan]")
+    console.print(f"[dim]NWS {office.id} Area Forecast Discussion[/dim]")
+    console.print(f"[dim]Issued: {issued_str}[/dim]\n")
+
+    # Discussion text
+    if raw:
+        console.print(disc.product_text)
+    else:
+        formatted = format_discussion(disc.product_text)
+        console.print(formatted)
+
+    console.print(f"\n[dim]Source: NWS {office.id} | forecast.weather.gov[/dim]")
+
+
+# =============================================================================
+# Precipitation command
+# =============================================================================
+
+
+@cli.command()
+@click.argument("location", required=False)
+@click.option(
+    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
+)
+@click.option("-n", "--days", default=7, help="Number of days to show (default: 7)")
+@click.option(
+    "-m",
+    "--model",
+    "model_name",
+    help="Weather model to use (see 'raindrop config models')",
+)
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def precip(
+    location: str | None,
+    country: str | None,
+    days: int,
+    model_name: str | None,
+    as_json: bool,
+):
+    """Show precipitation forecast and accumulation.
+
+    LOCATION can be a city name or a favorite alias (see 'raindrop fav list').
+    """
+    settings = get_settings()
+
+    # Resolve location (favorites, defaults)
+    try:
+        resolved_location, resolved_country = settings.resolve_location(location)
+    except ValueError:
+        raise click.ClickException(
+            "No location provided. Use 'raindrop precip <location>' or set a default with 'raindrop config set location <name>'"
+        )
+
+    # CLI country flag overrides resolved country
+    if country is not None:
+        resolved_country = country
+
+    location = resolved_location
+    country = resolved_country
+
+    # Resolve model (CLI flag > settings > auto)
+    model_key = model_name or settings.model
+    api_model = AVAILABLE_MODELS.get(model_key) if model_key else None
+    models = [api_model] if api_model else None
+
+    result = geocode(location, country)
+
+    weather = om.forecast(
+        result.latitude,
+        result.longitude,
+        daily=[
+            "precipitation_sum",
+            "precipitation_probability_max",
+            "precipitation_hours",
+            "rain_sum",
+            "showers_sum",
+            "snowfall_sum",
+            "weather_code",
+        ],
+        hourly=[
+            "precipitation",
+            "precipitation_probability",
+        ],
+        precipitation_unit=settings.precipitation_unit,
+        models=models,
+        forecast_days=min(days, 16),
+    )
+
+    d = weather.daily
+    h = weather.hourly
+    if d is None:
+        raise click.ClickException("No precipitation data returned")
+
+    precip_symbol = settings.precipitation_unit
+    times = d.time
+    precip_sums = d.precipitation_sum or []
+    precip_probs = d.precipitation_probability_max or []
+    precip_hours = d.precipitation_hours or []
+    rain_sums = d.rain_sum or []
+    snow_sums = d.snowfall_sum or []
+    codes = d.weather_code or []
+
+    # Calculate totals
+    total_precip = sum(p for p in precip_sums[:days] if p is not None)
+    total_rain = sum(r for r in rain_sums[:days] if r is not None)
+    total_snow = sum(s for s in snow_sums[:days] if s is not None)
+    total_hours = sum(h for h in precip_hours[:days] if h is not None)
+
+    # JSON output
+    if as_json:
+        daily_data = []
+        for i in range(min(len(times), days)):
+            daily_data.append(
+                {
+                    "date": times[i],
+                    "precipitation_sum": precip_sums[i]
+                    if i < len(precip_sums)
+                    else None,
+                    "precipitation_probability": precip_probs[i]
+                    if i < len(precip_probs)
+                    else None,
+                    "precipitation_hours": precip_hours[i]
+                    if i < len(precip_hours)
+                    else None,
+                    "rain_sum": rain_sums[i] if i < len(rain_sums) else None,
+                    "snowfall_sum": snow_sums[i] if i < len(snow_sums) else None,
+                    "weather_code": codes[i] if i < len(codes) else None,
+                }
+            )
+
+        data = {
+            "location": {
+                "name": result.name,
+                "admin1": result.admin1,
+                "country": result.country,
+                "latitude": result.latitude,
+                "longitude": result.longitude,
+            },
+            "model": model_key or "auto",
+            "totals": {
+                "precipitation": total_precip,
+                "rain": total_rain,
+                "snow": total_snow,
+                "hours": total_hours,
+            },
+            "days": daily_data,
+            "units": {
+                "precipitation": settings.precipitation_unit,
+            },
+        }
+        click.echo(json_lib.dumps(data, indent=2))
+        return
+
+    # Header
+    console.print(
+        f"\n[bold cyan]{result.name}, {result.admin1}, {result.country}[/bold cyan]"
+    )
+    console.print(f"[dim]{days}-day precipitation forecast[/dim]\n")
+
+    # Summary
+    if total_precip > 0:
+        console.print(
+            f"[bold]Total Expected:[/bold] {total_precip:.1f} {precip_symbol}"
+        )
+        if total_rain > 0:
+            console.print(f"  [blue]Rain:[/blue] {total_rain:.1f} {precip_symbol}")
+        if total_snow > 0:
+            console.print(f"  [white]Snow:[/white] {total_snow:.1f} {precip_symbol}")
+        if total_hours > 0:
+            console.print(f"  [dim]~{total_hours:.0f} hours of precipitation[/dim]")
+        console.print()
+    else:
+        console.print("[green]No precipitation expected[/green]\n")
+
+    # Daily breakdown table
+    table = Table(show_header=True, box=box.ROUNDED, header_style="bold")
+    table.add_column("Date", style="cyan", justify="right")
+    table.add_column("Chance", justify="right")
+    table.add_column("Amount", justify="right")
+    table.add_column("Type", justify="left")
+    table.add_column("Hours", justify="right")
+    table.add_column("Accumulation", justify="right")
+
+    today = datetime.now().date()
+    running_total = 0.0
+
+    for i in range(min(len(times), days)):
+        date = datetime.fromisoformat(times[i]).date()
+
+        # Date display
+        if date == today:
+            date_str = "[bold yellow]Today[/bold yellow]"
+        elif date == today + timedelta(days=1):
+            date_str = "Tomorrow"
+        else:
+            date_str = date.strftime("%a %d")
+
+        # Values
+        prob = precip_probs[i] if i < len(precip_probs) else 0
+        amount = precip_sums[i] if i < len(precip_sums) else 0
+        rain = rain_sums[i] if i < len(rain_sums) else 0
+        snow = snow_sums[i] if i < len(snow_sums) else 0
+        hours = precip_hours[i] if i < len(precip_hours) else 0
+
+        # Chance formatting
+        if prob == 0:
+            chance_str = "[dim]—[/dim]"
+        elif prob >= 70:
+            chance_str = f"[bold blue]{prob}%[/bold blue]"
+        elif prob >= 40:
+            chance_str = f"[blue]{prob}%[/blue]"
+        else:
+            chance_str = f"[dim]{prob}%[/dim]"
+
+        # Amount formatting
+        if amount == 0:
+            amount_str = "[dim]—[/dim]"
+        elif amount >= 10:
+            amount_str = f"[bold blue]{amount:.1f} {precip_symbol}[/bold blue]"
+        elif amount >= 2:
+            amount_str = f"[blue]{amount:.1f} {precip_symbol}[/blue]"
+        else:
+            amount_str = f"{amount:.1f} {precip_symbol}"
+
+        # Type
+        if snow > rain and snow > 0:
+            type_str = "[white]Snow[/white]"
+        elif rain > 0:
+            type_str = "[blue]Rain[/blue]"
+        elif amount > 0:
+            type_str = "[cyan]Mixed[/cyan]"
+        else:
+            type_str = "[dim]—[/dim]"
+
+        # Hours
+        hours_str = f"{hours:.0f}h" if hours > 0 else "[dim]—[/dim]"
+
+        # Running total
+        running_total += amount if amount else 0
+        if running_total > 0:
+            accum_str = f"{running_total:.1f} {precip_symbol}"
+        else:
+            accum_str = "[dim]—[/dim]"
+
+        table.add_row(date_str, chance_str, amount_str, type_str, hours_str, accum_str)
+
+    console.print(table)
+
+    # Hourly sparkline for next 24h
+    if h and h.precipitation_probability:
+        now = datetime.now()
+        current_hour_str = now.strftime("%Y-%m-%dT%H:00")
+        try:
+            start_idx = h.time.index(current_hour_str)
+        except ValueError:
+            start_idx = 0
+
+        probs = h.precipitation_probability[start_idx : start_idx + 24]
+        amounts = (h.precipitation or [])[start_idx : start_idx + 24]
+
+        if probs:
+            console.print(f"\n[dim]Next 24h chance:[/dim] {sparkline(probs)}")
+        if amounts and any(a > 0 for a in amounts if a is not None):
+            console.print(f"[dim]Next 24h amount:[/dim] {sparkline(amounts)}")
 
 
 if __name__ == "__main__":

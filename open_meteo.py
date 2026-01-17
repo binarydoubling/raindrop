@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 FORECAST_BASE_URL = "https://api.open-meteo.com/v1"
 GEOCODING_BASE_URL = "https://geocoding-api.open-meteo.com/v1"
+AIR_QUALITY_BASE_URL = "https://air-quality-api.open-meteo.com/v1"
+NWS_API_BASE_URL = "https://api.weather.gov"
 
 
 class OpenMeteoError(Exception):
@@ -293,6 +295,76 @@ class ForecastResult:
 
 
 # =============================================================================
+# Air Quality Types
+# =============================================================================
+
+
+@dataclass
+class CurrentAirQuality:
+    """Current air quality conditions."""
+
+    time: str
+    interval: int
+    us_aqi: int | None = None
+    european_aqi: int | None = None
+    pm10: float | None = None
+    pm2_5: float | None = None
+    carbon_monoxide: float | None = None
+    nitrogen_dioxide: float | None = None
+    sulphur_dioxide: float | None = None
+    ozone: float | None = None
+    dust: float | None = None
+    uv_index: float | None = None
+    uv_index_clear_sky: float | None = None
+    ammonia: float | None = None
+    alder_pollen: float | None = None
+    birch_pollen: float | None = None
+    grass_pollen: float | None = None
+    mugwort_pollen: float | None = None
+    olive_pollen: float | None = None
+    ragweed_pollen: float | None = None
+
+
+@dataclass
+class HourlyAirQuality:
+    """Hourly air quality forecast."""
+
+    time: list[str]
+    us_aqi: list[int] | None = None
+    european_aqi: list[int] | None = None
+    pm10: list[float] | None = None
+    pm2_5: list[float] | None = None
+    carbon_monoxide: list[float] | None = None
+    nitrogen_dioxide: list[float] | None = None
+    sulphur_dioxide: list[float] | None = None
+    ozone: list[float] | None = None
+    dust: list[float] | None = None
+    uv_index: list[float] | None = None
+    uv_index_clear_sky: list[float] | None = None
+    ammonia: list[float] | None = None
+    alder_pollen: list[float] | None = None
+    birch_pollen: list[float] | None = None
+    grass_pollen: list[float] | None = None
+    mugwort_pollen: list[float] | None = None
+    olive_pollen: list[float] | None = None
+    ragweed_pollen: list[float] | None = None
+
+
+@dataclass
+class AirQualityResult:
+    """Air quality response."""
+
+    latitude: float
+    longitude: float
+    elevation: float
+    timezone: str
+    timezone_abbreviation: str
+    utc_offset_seconds: int
+    current: CurrentAirQuality | None = None
+    hourly: HourlyAirQuality | None = None
+
+
+# =============================================================================
 # API Client
 # =============================================================================
 
@@ -304,10 +376,12 @@ class OpenMeteo:
         self,
         forecast_base_url: str = FORECAST_BASE_URL,
         geocoding_base_url: str = GEOCODING_BASE_URL,
+        air_quality_base_url: str = AIR_QUALITY_BASE_URL,
         timeout: int = 10,
     ):
         self.forecast_base_url = forecast_base_url
         self.geocoding_base_url = geocoding_base_url
+        self.air_quality_base_url = air_quality_base_url
         self.timeout = timeout
 
     def _request(self, url: str) -> dict[str, Any]:
@@ -605,4 +679,221 @@ class OpenMeteo:
             current=current_weather,
             hourly=hourly_weather,
             daily=daily_weather,
+        )
+
+    def air_quality(
+        self,
+        latitude: float,
+        longitude: float,
+        *,
+        current: list[str] | None = None,
+        hourly: list[str] | None = None,
+        timezone: str = "auto",
+        forecast_days: int = 5,
+        past_days: int = 0,
+        domains: str = "auto",
+    ) -> AirQualityResult:
+        """
+        Get air quality forecast for a location.
+
+        Args:
+            latitude: Latitude (-90 to 90)
+            longitude: Longitude (-180 to 180)
+            current: Current air quality variables to include
+            hourly: Hourly air quality variables to include
+            timezone: Timezone for times (e.g., "America/New_York", "auto")
+            forecast_days: Number of forecast days (1-7)
+            past_days: Number of past days to include (0-92)
+            domains: Domain selection ("auto", "cams_europe", "cams_global")
+
+        Returns:
+            AirQualityResult with requested air quality data
+
+        Raises:
+            OpenMeteoError: If request fails
+        """
+        query = self._build_query(
+            {
+                "latitude": latitude,
+                "longitude": longitude,
+                "current": current,
+                "hourly": hourly,
+                "timezone": timezone,
+                "forecast_days": forecast_days,
+                "past_days": past_days,
+                "domains": domains,
+            }
+        )
+        url = f"{self.air_quality_base_url}/air-quality?{query}"
+
+        data = self._request(url)
+
+        # Parse current air quality
+        current_aq = None
+        if "current" in data:
+            c = data["current"]
+            current_aq = CurrentAirQuality(
+                time=c["time"],
+                interval=c["interval"],
+                us_aqi=c.get("us_aqi"),
+                european_aqi=c.get("european_aqi"),
+                pm10=c.get("pm10"),
+                pm2_5=c.get("pm2_5"),
+                carbon_monoxide=c.get("carbon_monoxide"),
+                nitrogen_dioxide=c.get("nitrogen_dioxide"),
+                sulphur_dioxide=c.get("sulphur_dioxide"),
+                ozone=c.get("ozone"),
+                dust=c.get("dust"),
+                uv_index=c.get("uv_index"),
+                uv_index_clear_sky=c.get("uv_index_clear_sky"),
+                ammonia=c.get("ammonia"),
+                alder_pollen=c.get("alder_pollen"),
+                birch_pollen=c.get("birch_pollen"),
+                grass_pollen=c.get("grass_pollen"),
+                mugwort_pollen=c.get("mugwort_pollen"),
+                olive_pollen=c.get("olive_pollen"),
+                ragweed_pollen=c.get("ragweed_pollen"),
+            )
+
+        # Parse hourly air quality
+        hourly_aq = None
+        if "hourly" in data:
+            h = data["hourly"]
+            hourly_aq = HourlyAirQuality(
+                time=h["time"],
+                us_aqi=h.get("us_aqi"),
+                european_aqi=h.get("european_aqi"),
+                pm10=h.get("pm10"),
+                pm2_5=h.get("pm2_5"),
+                carbon_monoxide=h.get("carbon_monoxide"),
+                nitrogen_dioxide=h.get("nitrogen_dioxide"),
+                sulphur_dioxide=h.get("sulphur_dioxide"),
+                ozone=h.get("ozone"),
+                dust=h.get("dust"),
+                uv_index=h.get("uv_index"),
+                uv_index_clear_sky=h.get("uv_index_clear_sky"),
+                ammonia=h.get("ammonia"),
+                alder_pollen=h.get("alder_pollen"),
+                birch_pollen=h.get("birch_pollen"),
+                grass_pollen=h.get("grass_pollen"),
+                mugwort_pollen=h.get("mugwort_pollen"),
+                olive_pollen=h.get("olive_pollen"),
+                ragweed_pollen=h.get("ragweed_pollen"),
+            )
+
+        return AirQualityResult(
+            latitude=data["latitude"],
+            longitude=data["longitude"],
+            elevation=data.get("elevation", 0),
+            timezone=data["timezone"],
+            timezone_abbreviation=data["timezone_abbreviation"],
+            utc_offset_seconds=data["utc_offset_seconds"],
+            current=current_aq,
+            hourly=hourly_aq,
+        )
+
+
+# =============================================================================
+# NWS API Client (for forecast discussions)
+# =============================================================================
+
+
+@dataclass
+class NWSOffice:
+    """NWS Weather Forecast Office info."""
+
+    id: str  # e.g., "MTR"
+    name: str  # e.g., "San Francisco Bay Area"
+
+
+@dataclass
+class ForecastDiscussion:
+    """NWS Area Forecast Discussion."""
+
+    id: str
+    office: str
+    issuance_time: str
+    product_text: str
+
+
+class NWSClient:
+    """Client for NWS API (forecast discussions, alerts, etc.)."""
+
+    def __init__(
+        self,
+        base_url: str = NWS_API_BASE_URL,
+        timeout: int = 10,
+        user_agent: str = "raindrop-weather-cli (github.com/binarydoubling/raindrop)",
+    ):
+        self.base_url = base_url
+        self.timeout = timeout
+        self.user_agent = user_agent
+
+    def _request(self, url: str) -> dict[str, Any]:
+        """Make HTTP request with proper User-Agent header."""
+        req = urllib.request.Request(url)
+        req.add_header("User-Agent", self.user_agent)
+        req.add_header("Accept", "application/geo+json")
+
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as response:
+                return json.loads(response.read().decode())
+        except urllib.error.HTTPError as e:
+            try:
+                body = json.loads(e.read().decode())
+                reason = body.get("detail", str(e))
+            except (json.JSONDecodeError, AttributeError):
+                reason = f"HTTP {e.code}: {e.reason}"
+            raise OpenMeteoError(f"NWS API error: {reason}")
+        except urllib.error.URLError as e:
+            raise OpenMeteoError(f"Network error: {e.reason}")
+        except TimeoutError:
+            raise OpenMeteoError("Request timed out")
+        except json.JSONDecodeError as e:
+            raise OpenMeteoError(f"Invalid JSON response: {e}")
+
+    def get_office_for_point(self, latitude: float, longitude: float) -> NWSOffice:
+        """Get the NWS forecast office for a location."""
+        url = f"{self.base_url}/points/{latitude},{longitude}"
+        data = self._request(url)
+
+        props = data.get("properties", {})
+        office_url = props.get("forecastOffice", "")
+        # Extract office ID from URL like "https://api.weather.gov/offices/MTR"
+        office_id = office_url.split("/")[-1] if office_url else ""
+
+        # Get office name
+        office_name = (
+            props.get("relativeLocation", {}).get("properties", {}).get("city", "")
+        )
+        if not office_name:
+            office_name = f"NWS {office_id}"
+
+        return NWSOffice(id=office_id, name=office_name)
+
+    def get_latest_discussion(self, office_id: str) -> ForecastDiscussion:
+        """Get the latest Area Forecast Discussion for an NWS office."""
+        # Get list of AFD products for this office
+        url = f"{self.base_url}/products/types/AFD/locations/{office_id}"
+        data = self._request(url)
+
+        products = data.get("@graph", [])
+        if not products:
+            raise OpenMeteoError(
+                f"No forecast discussions found for office {office_id}"
+            )
+
+        # Get the latest one (first in list)
+        latest = products[0]
+        product_id = latest.get("id")
+
+        # Fetch the full product
+        product_url = f"{self.base_url}/products/{product_id}"
+        product_data = self._request(product_url)
+
+        return ForecastDiscussion(
+            id=product_id,
+            office=office_id,
+            issuance_time=product_data.get("issuanceTime", ""),
+            product_text=product_data.get("productText", ""),
         )
