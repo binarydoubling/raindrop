@@ -102,44 +102,15 @@ def ema(values: list[float], period: int) -> list[float | None]:
     return result
 
 
-def calc_rsi(values: list[float], period: int = 5) -> list[float | None]:
-    """Calculate Relative Strength Index for temperature momentum."""
-    if len(values) < period + 1:
-        return [None] * len(values)
-
+def calc_roc(values: list[float], period: int = 3) -> list[float | None]:
+    """
+    Calculate Rate of Change over a period.
+    Returns the temperature change over the last N days.
+    """
     result: list[float | None] = [None] * period
-
-    # Calculate price changes
-    changes = [values[i] - values[i - 1] for i in range(1, len(values))]
-
-    # Initial averages
-    gains = [max(0, c) for c in changes[:period]]
-    losses = [abs(min(0, c)) for c in changes[:period]]
-    avg_gain = sum(gains) / period
-    avg_loss = sum(losses) / period
-
-    # First RSI
-    if avg_loss == 0:
-        result.append(100.0)
-    else:
-        rs = avg_gain / avg_loss
-        result.append(100 - (100 / (1 + rs)))
-
-    # Smoothed RSI
-    for i in range(period, len(changes)):
-        change = changes[i]
-        gain = max(0, change)
-        loss = abs(min(0, change))
-
-        avg_gain = (avg_gain * (period - 1) + gain) / period
-        avg_loss = (avg_loss * (period - 1) + loss) / period
-
-        if avg_loss == 0:
-            result.append(100.0)
-        else:
-            rs = avg_gain / avg_loss
-            result.append(100 - (100 / (1 + rs)))
-
+    for i in range(period, len(values)):
+        roc = values[i] - values[i - period]
+        result.append(roc)
     return result
 
 
@@ -173,21 +144,28 @@ def trend_signal(
         return ("→ Stable", "dim")
 
 
-def momentum_signal(rsi: float | None) -> tuple[str, str]:
-    """Interpret RSI as momentum signal."""
-    if rsi is None:
+def roc_signal(roc: float | None) -> tuple[str, str]:
+    """
+    Interpret rate of change as a momentum signal.
+    Returns (description, color).
+    """
+    if roc is None:
         return ("—", "dim")
 
-    if rsi >= 70:
-        return ("Overbought", "red")
-    elif rsi >= 60:
-        return ("Strong", "yellow")
-    elif rsi <= 30:
-        return ("Oversold", "cyan")
-    elif rsi <= 40:
-        return ("Weak", "blue")
+    if roc >= 10:
+        return ("Surging", "bold red")
+    elif roc >= 5:
+        return ("Rising", "red")
+    elif roc >= 2:
+        return ("Warming", "yellow")
+    elif roc <= -10:
+        return ("Plunging", "bold cyan")
+    elif roc <= -5:
+        return ("Falling", "cyan")
+    elif roc <= -2:
+        return ("Cooling", "blue")
     else:
-        return ("Neutral", "dim")
+        return ("Steady", "dim")
 
 
 @click.group()
@@ -849,7 +827,7 @@ def daily(location: str | None, country: str | None, days: int, model_name: str 
     avg_temps = [(h + l) / 2 for h, l in zip(highs, lows)]
     ema_3 = ema(avg_temps, 3)  # Short-term EMA
     ema_7 = ema(avg_temps, 7)  # Long-term EMA
-    rsi_vals = calc_rsi(avg_temps, 5)
+    roc_vals = calc_roc(avg_temps, 3)  # 3-day rate of change
     volatility = calc_volatility(highs, lows)
 
     # Location header
@@ -862,13 +840,13 @@ def daily(location: str | None, country: str | None, days: int, model_name: str 
     table = Table(box=box.ROUNDED, show_header=True, header_style="bold")
     table.add_column("Date", style="cyan", justify="right")
     table.add_column("Weather", justify="left")
-    table.add_column(f"High", justify="right")
-    table.add_column(f"Low", justify="right")
+    table.add_column("High", justify="right")
+    table.add_column("Low", justify="right")
     table.add_column("Range", justify="right")
     table.add_column("Precip", justify="right")
-    table.add_column(f"Wind", justify="right")
+    table.add_column("Wind", justify="right")
     table.add_column("Trend", justify="center")
-    table.add_column("Mom", justify="center")
+    table.add_column("Δ3d", justify="right")  # 3-day rate of change
 
     today = datetime.now().date()
 
@@ -944,13 +922,13 @@ def daily(location: str | None, country: str | None, days: int, model_name: str 
         trend_txt, trend_color = trend_signal(avg_temps[i], ema_s, ema_l)
         trend_str = f"[{trend_color}]{trend_txt}[/{trend_color}]"
 
-        # Momentum (RSI)
-        rsi = rsi_vals[i] if i < len(rsi_vals) else None
-        mom_txt, mom_color = momentum_signal(rsi)
-        if rsi is not None:
-            mom_str = f"[{mom_color}]{rsi:.0f}[/{mom_color}]"
+        # Rate of change (3-day)
+        roc = roc_vals[i] if i < len(roc_vals) else None
+        if roc is not None:
+            roc_txt, roc_color = roc_signal(roc)
+            roc_str = f"[{roc_color}]{roc:+.0f}°[/{roc_color}]"
         else:
-            mom_str = "[dim]—[/dim]"
+            roc_str = "[dim]—[/dim]"
 
         table.add_row(
             date_str,
@@ -961,7 +939,7 @@ def daily(location: str | None, country: str | None, days: int, model_name: str 
             precip_str,
             wind_str,
             trend_str,
-            mom_str,
+            roc_str,
         )
 
     console.print(table)
@@ -985,13 +963,13 @@ def daily(location: str | None, country: str | None, days: int, model_name: str 
                 f"[dim]Signal:[/dim] [{trend_color}]{trend_txt}[/{trend_color}]"
             )
 
-    # RSI
-    if len(rsi_vals) > 0 and rsi_vals[-1] is not None:
-        rsi_val = rsi_vals[-1]
-        mom_txt, mom_color = momentum_signal(rsi_val)
+    # Rate of change
+    if len(roc_vals) > 0 and roc_vals[-1] is not None:
+        roc_val = roc_vals[-1]
+        roc_txt, roc_color = roc_signal(roc_val)
         console.print(
-            f"[dim]RSI(5):[/dim] [{mom_color}]{rsi_val:.1f}[/{mom_color}]  "
-            f"[dim]Momentum:[/dim] [{mom_color}]{mom_txt}[/{mom_color}]"
+            f"[dim]3-day Δ:[/dim] [{roc_color}]{roc_val:+.1f}°[/{roc_color}]  "
+            f"[dim]Rate:[/dim] [{roc_color}]{roc_txt}[/{roc_color}]"
         )
 
     # Volatility trend
@@ -1012,11 +990,9 @@ def daily(location: str | None, country: str | None, days: int, model_name: str 
 
     # Legend
     console.print(
-        "\n[dim]Trend: EMA(3) vs EMA(7) crossover · Mom: RSI(5) temperature momentum[/dim]"
+        "\n[dim]Trend: EMA(3)/EMA(7) crossover · Δ3d: 3-day temperature change[/dim]"
     )
-    console.print(
-        "[dim]▲ Hot (>2%) · ↗ Warming · → Stable · ↘ Cooling · ▼ Cold (<-2%)[/dim]"
-    )
+    console.print("[dim]▲ Hot · ↗ Warming · → Stable · ↘ Cooling · ▼ Cold[/dim]")
 
 
 if __name__ == "__main__":
