@@ -77,6 +77,119 @@ def format_duration(td: timedelta) -> str:
         return f"{minutes}m"
 
 
+# =============================================================================
+# Technical Analysis Functions
+# =============================================================================
+
+
+def ema(values: list[float], period: int) -> list[float | None]:
+    """Calculate Exponential Moving Average."""
+    if len(values) < period:
+        return [None] * len(values)
+
+    result: list[float | None] = [None] * (period - 1)
+    multiplier = 2 / (period + 1)
+
+    # First EMA is SMA
+    sma = sum(values[:period]) / period
+    result.append(sma)
+
+    # Calculate EMA for remaining values
+    for i in range(period, len(values)):
+        ema_val = (values[i] - result[-1]) * multiplier + result[-1]  # type: ignore
+        result.append(ema_val)
+
+    return result
+
+
+def calc_rsi(values: list[float], period: int = 5) -> list[float | None]:
+    """Calculate Relative Strength Index for temperature momentum."""
+    if len(values) < period + 1:
+        return [None] * len(values)
+
+    result: list[float | None] = [None] * period
+
+    # Calculate price changes
+    changes = [values[i] - values[i - 1] for i in range(1, len(values))]
+
+    # Initial averages
+    gains = [max(0, c) for c in changes[:period]]
+    losses = [abs(min(0, c)) for c in changes[:period]]
+    avg_gain = sum(gains) / period
+    avg_loss = sum(losses) / period
+
+    # First RSI
+    if avg_loss == 0:
+        result.append(100.0)
+    else:
+        rs = avg_gain / avg_loss
+        result.append(100 - (100 / (1 + rs)))
+
+    # Smoothed RSI
+    for i in range(period, len(changes)):
+        change = changes[i]
+        gain = max(0, change)
+        loss = abs(min(0, change))
+
+        avg_gain = (avg_gain * (period - 1) + gain) / period
+        avg_loss = (avg_loss * (period - 1) + loss) / period
+
+        if avg_loss == 0:
+            result.append(100.0)
+        else:
+            rs = avg_gain / avg_loss
+            result.append(100 - (100 / (1 + rs)))
+
+    return result
+
+
+def calc_volatility(highs: list[float], lows: list[float]) -> list[float]:
+    """Calculate daily temperature range (volatility)."""
+    return [h - l for h, l in zip(highs, lows)]
+
+
+def trend_signal(
+    value: float, ema_short: float | None, ema_long: float | None
+) -> tuple[str, str]:
+    """
+    Determine trend signal based on EMA crossover.
+    Returns (signal, color).
+    """
+    if ema_short is None or ema_long is None:
+        return ("—", "dim")
+
+    diff = ema_short - ema_long
+    pct_diff = (diff / ema_long) * 100 if ema_long != 0 else 0
+
+    if pct_diff > 2:
+        return ("▲ Hot", "red")
+    elif pct_diff > 0.5:
+        return ("↗ Warming", "yellow")
+    elif pct_diff < -2:
+        return ("▼ Cold", "cyan")
+    elif pct_diff < -0.5:
+        return ("↘ Cooling", "blue")
+    else:
+        return ("→ Stable", "dim")
+
+
+def momentum_signal(rsi: float | None) -> tuple[str, str]:
+    """Interpret RSI as momentum signal."""
+    if rsi is None:
+        return ("—", "dim")
+
+    if rsi >= 70:
+        return ("Overbought", "red")
+    elif rsi >= 60:
+        return ("Strong", "yellow")
+    elif rsi <= 30:
+        return ("Oversold", "cyan")
+    elif rsi <= 40:
+        return ("Weak", "blue")
+    else:
+        return ("Neutral", "dim")
+
+
 @click.group()
 @click.version_option(version="0.1.0")
 def cli():
@@ -657,6 +770,253 @@ def hourly(
 
     # Legend
     console.print("\n[dim]↑ rising  ↓ falling  · steady[/dim]")
+
+
+@cli.command()
+@click.argument("location", required=False)
+@click.option(
+    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
+)
+@click.option("-n", "--days", default=10, help="Number of days to show (default: 10)")
+@click.option(
+    "-m",
+    "--model",
+    "model_name",
+    help="Weather model to use (see 'weather config models')",
+)
+def daily(location: str | None, country: str | None, days: int, model_name: str | None):
+    """Show daily forecast with technical analysis indicators."""
+    settings = get_settings()
+
+    # Use defaults from settings if not provided
+    if location is None:
+        location = settings.location
+    if location is None:
+        raise click.ClickException(
+            "No location provided. Use 'weather daily <location>' or set a default with 'weather config set location <name>'"
+        )
+
+    if country is None:
+        country = settings.country_code
+
+    # Resolve model (CLI flag > settings > auto)
+    model_key = model_name or settings.model
+    api_model = AVAILABLE_MODELS.get(model_key) if model_key else None
+    models = [api_model] if api_model else None
+
+    result = geocode(location, country)
+
+    weather = om.forecast(
+        result.latitude,
+        result.longitude,
+        daily=[
+            "weather_code",
+            "temperature_2m_max",
+            "temperature_2m_min",
+            "apparent_temperature_max",
+            "apparent_temperature_min",
+            "precipitation_sum",
+            "precipitation_probability_max",
+            "wind_speed_10m_max",
+            "wind_gusts_10m_max",
+            "uv_index_max",
+        ],
+        temperature_unit=settings.temperature_unit,
+        wind_speed_unit=settings.wind_speed_unit,
+        precipitation_unit=settings.precipitation_unit,
+        models=models,
+        forecast_days=min(days, 16),
+    )
+    d = weather.daily
+    if d is None:
+        raise click.ClickException("No daily weather data returned")
+
+    temp_symbol = TEMP_SYMBOLS[settings.temperature_unit]
+    wind_symbol = WIND_SYMBOLS[settings.wind_speed_unit]
+    precip_symbol = settings.precipitation_unit
+
+    # Get data arrays
+    times = d.time
+    codes = d.weather_code or []
+    highs = d.temperature_2m_max or []
+    lows = d.temperature_2m_min or []
+    precip_probs = d.precipitation_probability_max or []
+    precip_sums = d.precipitation_sum or []
+    wind_maxs = d.wind_speed_10m_max or []
+    uv_maxs = d.uv_index_max or []
+
+    # Calculate technical indicators using average temperature
+    avg_temps = [(h + l) / 2 for h, l in zip(highs, lows)]
+    ema_3 = ema(avg_temps, 3)  # Short-term EMA
+    ema_7 = ema(avg_temps, 7)  # Long-term EMA
+    rsi_vals = calc_rsi(avg_temps, 5)
+    volatility = calc_volatility(highs, lows)
+
+    # Location header
+    console.print(
+        f"\n[bold cyan]{result.name}, {result.admin1}, {result.country}[/bold cyan]"
+    )
+    console.print(f"[dim]{days}-day forecast · Model: {model_key or 'auto'}[/dim]\n")
+
+    # Main forecast table
+    table = Table(box=box.ROUNDED, show_header=True, header_style="bold")
+    table.add_column("Date", style="cyan", justify="right")
+    table.add_column("Weather", justify="left")
+    table.add_column(f"High", justify="right")
+    table.add_column(f"Low", justify="right")
+    table.add_column("Range", justify="right")
+    table.add_column("Precip", justify="right")
+    table.add_column(f"Wind", justify="right")
+    table.add_column("Trend", justify="center")
+    table.add_column("Mom", justify="center")
+
+    today = datetime.now().date()
+
+    for i in range(min(len(times), days)):
+        date = datetime.fromisoformat(times[i]).date()
+
+        # Date display
+        if date == today:
+            date_str = "[bold yellow]Today[/bold yellow]"
+        elif date == today + timedelta(days=1):
+            date_str = "Tomorrow"
+        else:
+            date_str = date.strftime("%a %d")
+
+        # Weather
+        code = codes[i] if i < len(codes) else 0
+        label, color = WEATHER_LABELS.get(code, ("?", "white"))
+        weather_str = f"[{color}]{label}[/{color}]"
+
+        # Temps
+        high = highs[i] if i < len(highs) else 0
+        low = lows[i] if i < len(lows) else 0
+        vol = volatility[i] if i < len(volatility) else 0
+
+        # High with delta
+        if i > 0 and i < len(highs):
+            high_delta = high - highs[i - 1]
+            if abs(high_delta) < 1:
+                high_str = f"{high:.0f}°{temp_symbol} [dim]·[/dim]"
+            elif high_delta > 0:
+                high_str = f"{high:.0f}°{temp_symbol} [red]↑{abs(high_delta):.0f}[/red]"
+            else:
+                high_str = (
+                    f"{high:.0f}°{temp_symbol} [cyan]↓{abs(high_delta):.0f}[/cyan]"
+                )
+        else:
+            high_str = f"{high:.0f}°{temp_symbol}"
+
+        # Low with delta
+        if i > 0 and i < len(lows):
+            low_delta = low - lows[i - 1]
+            if abs(low_delta) < 1:
+                low_str = f"{low:.0f}°{temp_symbol} [dim]·[/dim]"
+            elif low_delta > 0:
+                low_str = f"{low:.0f}°{temp_symbol} [red]↑{abs(low_delta):.0f}[/red]"
+            else:
+                low_str = f"{low:.0f}°{temp_symbol} [cyan]↓{abs(low_delta):.0f}[/cyan]"
+        else:
+            low_str = f"{low:.0f}°{temp_symbol}"
+
+        # Range (volatility)
+        range_str = f"{vol:.0f}°"
+
+        # Precipitation
+        prob = precip_probs[i] if i < len(precip_probs) else 0
+        amount = precip_sums[i] if i < len(precip_sums) else 0
+        if prob == 0:
+            precip_str = "[dim]—[/dim]"
+        elif prob >= 70:
+            precip_str = f"[bold blue]{prob}%[/bold blue] {amount:.1f}{precip_symbol}"
+        elif prob >= 40:
+            precip_str = f"[blue]{prob}%[/blue] {amount:.1f}{precip_symbol}"
+        else:
+            precip_str = f"[dim]{prob}%[/dim]"
+
+        # Wind
+        wind = wind_maxs[i] if i < len(wind_maxs) else 0
+        wind_str = f"{wind:.0f} {wind_symbol}"
+
+        # Trend signal (EMA crossover)
+        ema_s = ema_3[i] if i < len(ema_3) else None
+        ema_l = ema_7[i] if i < len(ema_7) else None
+        trend_txt, trend_color = trend_signal(avg_temps[i], ema_s, ema_l)
+        trend_str = f"[{trend_color}]{trend_txt}[/{trend_color}]"
+
+        # Momentum (RSI)
+        rsi = rsi_vals[i] if i < len(rsi_vals) else None
+        mom_txt, mom_color = momentum_signal(rsi)
+        if rsi is not None:
+            mom_str = f"[{mom_color}]{rsi:.0f}[/{mom_color}]"
+        else:
+            mom_str = "[dim]—[/dim]"
+
+        table.add_row(
+            date_str,
+            weather_str,
+            high_str,
+            low_str,
+            range_str,
+            precip_str,
+            wind_str,
+            trend_str,
+            mom_str,
+        )
+
+    console.print(table)
+
+    # Technical analysis summary
+    console.print("\n[bold]Technical Analysis[/bold]")
+
+    # Current trend
+    if len(ema_3) > 0 and len(ema_7) > 0:
+        latest_ema3 = ema_3[-1]
+        latest_ema7 = ema_7[-1]
+        if latest_ema3 is not None and latest_ema7 is not None:
+            trend_txt, trend_color = trend_signal(
+                avg_temps[-1], latest_ema3, latest_ema7
+            )
+            ema_diff = latest_ema3 - latest_ema7
+            console.print(
+                f"[dim]EMA(3):[/dim] {latest_ema3:.1f}°  "
+                f"[dim]EMA(7):[/dim] {latest_ema7:.1f}°  "
+                f"[dim]Spread:[/dim] [{trend_color}]{ema_diff:+.1f}°[/{trend_color}]  "
+                f"[dim]Signal:[/dim] [{trend_color}]{trend_txt}[/{trend_color}]"
+            )
+
+    # RSI
+    if len(rsi_vals) > 0 and rsi_vals[-1] is not None:
+        rsi_val = rsi_vals[-1]
+        mom_txt, mom_color = momentum_signal(rsi_val)
+        console.print(
+            f"[dim]RSI(5):[/dim] [{mom_color}]{rsi_val:.1f}[/{mom_color}]  "
+            f"[dim]Momentum:[/dim] [{mom_color}]{mom_txt}[/{mom_color}]"
+        )
+
+    # Volatility trend
+    if len(volatility) >= 3:
+        recent_vol = sum(volatility[-3:]) / 3
+        earlier_vol = sum(volatility[:3]) / 3 if len(volatility) >= 6 else recent_vol
+        vol_change = recent_vol - earlier_vol
+        if vol_change > 2:
+            vol_trend = "[red]Increasing[/red]"
+        elif vol_change < -2:
+            vol_trend = "[green]Decreasing[/green]"
+        else:
+            vol_trend = "[dim]Stable[/dim]"
+        console.print(
+            f"[dim]Avg Range:[/dim] {recent_vol:.1f}°  "
+            f"[dim]Volatility:[/dim] {vol_trend}"
+        )
+
+    # Legend
+    console.print(
+        "\n[dim]Trend: EMA(3) vs EMA(7) crossover · Mom: RSI(5) temperature momentum[/dim]"
+    )
+    console.print(
+        "[dim]▲ Hot (>2%) · ↗ Warming · → Stable · ↘ Cooling · ▼ Cold (<-2%)[/dim]"
+    )
 
 
 if __name__ == "__main__":
