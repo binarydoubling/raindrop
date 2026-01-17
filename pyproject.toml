@@ -10,7 +10,7 @@ dependencies = [
 ]
 
 [project.scripts]
-weather = "main:cli"
+raindrop = "main:cli"
 
 [build-system]
 requires = ["hatchling"]
