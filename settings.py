@@ -12,10 +12,8 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 
 
 # Available weather models (from Open-Meteo docs)
-# Format: (display_name, api_name)
+# Maps friendly name -> API name
 AVAILABLE_MODELS: dict[str, str] = {
-    # Best match (default)
-    "auto": "best_match",
     # ECMWF
     "ecmwf": "ecmwf_ifs025",
     "ecmwf_aifs": "ecmwf_aifs025",
@@ -55,7 +53,7 @@ class Settings:
     precipitation_unit: PrecipitationUnit = "mm"
 
     # Weather model
-    model: str | None = None  # None means "best_match" (auto)
+    model: str | None = None  # None = let Open-Meteo auto-select
 
     def save(self) -> None:
         """Save settings to config file."""

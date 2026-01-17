@@ -93,11 +93,14 @@ def config_set(key: str, value: str):
             raise click.ClickException("precipitation_unit must be 'mm' or 'inch'")
         settings.precipitation_unit = value  # type: ignore
     elif key == "model":
-        if value not in AVAILABLE_MODELS and value != "auto":
+        if value == "auto":
+            settings.model = None
+        elif value not in AVAILABLE_MODELS:
             raise click.ClickException(
                 f"Unknown model: {value}. Run 'weather config models' to see available models."
             )
-        settings.model = None if value == "auto" else value
+        else:
+            settings.model = value
     else:
         raise click.ClickException(f"Unknown setting: {key}")
 
@@ -133,8 +136,10 @@ def config_models():
     console.print("[dim]Use 'weather config set model <name>' to set a default.[/dim]")
     console.print("[dim]Or use '--model <name>' flag on any command.[/dim]\n")
 
+    console.print("[cyan]Auto (default)[/cyan]")
+    console.print("  [dim]Omit --model to let Open-Meteo choose the best model[/dim]\n")
+
     models_by_category = {
-        "Global": ["auto"],
         "ECMWF (European)": ["ecmwf", "ecmwf_aifs"],
         "US (NOAA)": ["gfs", "hrrr"],
         "German (DWD)": ["icon", "icon_eu", "icon_d2"],
