@@ -45,7 +45,7 @@ Most weather CLIs give you temperature and a condition. Raindrop gives you **eve
 
 ```bash
 # pip
-pip install raindrop-weather
+pip install rdrop
 
 # From source
 git clone https://github.com/binarydoubling/raindrop.git

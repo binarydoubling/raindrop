@@ -1,13 +1,35 @@
 [project]
-name = "raindrop"
+name = "rdrop"
 version = "0.1.0"
-description = "A simple weather CLI tool"
+description = "A beautiful, feature-rich weather CLI for your terminal"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
+authors = [
+    { name = "binarydoubling" },
+]
+keywords = ["weather", "cli", "terminal", "forecast", "sparklines", "tui"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Utilities",
+]
 dependencies = [
     "click>=8.3.1",
     "rich>=14.2.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/binarydoubling/raindrop"
+Repository = "https://github.com/binarydoubling/raindrop"
+Issues = "https://github.com/binarydoubling/raindrop/issues"
 
 [project.scripts]
 raindrop = "raindrop.cli:main"
@@ -18,6 +40,14 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["raindrop"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"open_meteo.py" = "open_meteo.py"
+"settings.py" = "settings.py"
+
+[tool.hatch.build.targets.sdist.force-include]
+"open_meteo.py" = "open_meteo.py"
+"settings.py" = "settings.py"
 
 [dependency-groups]
 dev = [
