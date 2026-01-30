@@ -20,7 +20,7 @@
 <br>
 
 <p align="center">
-  <img src="assets/banner.svg" alt="Raindrop demo" width="680">
+  <img src="assets/current.svg" alt="raindrop current Seattle" width="700">
 </p>
 
 ---
@@ -74,95 +74,45 @@ raindrop current home                             # use it anywhere
 
 ### Current Weather
 
-```
-╭─ Seattle, Washington, United States ───────────────────────────╮
-│                                                                │
-│   Partly Cloudy                                       58°F     │
-│                                                                │
-│   Feels Like    55°F        Humidity      62%                  │
-│   Wind          12 mph NW   Pressure      1018 hPa             │
-│   UV Index      4 (Mod)     Visibility    10 mi                │
-│   Dew Point     45°F        Cloud Cover   35%                  │
-│                                                                │
-╰────────────────────────────────────────────────────────────────╯
-```
-
-Compact mode for shell prompts:
-
-```bash
-$ raindrop current Seattle --compact
-Seattle: 58°F ↑62° ↓49° | Partly Cloudy | 62% | 12mph NW
-```
+<img src="assets/current.svg" alt="raindrop current Seattle" width="700">
 
 ### Hourly Forecast with Sparklines
 
-```
-╭─ Hourly Forecast ─ Seattle ────────────────────────────────────╮
-│                                                                │
-│  Temperature:   ▁▁▂▃▄▅▆▇█▇▆▅▄▃▂▁▁▁▂▂▃▄▅▆                     │
-│                 52° ─────────────────── 67° ──────► 58°        │
-│                                                                │
-│  Precipitation: ▁▁▁▁▁▁▁▁▁▁▂▃▄▃▂▁▁▂▃▅▆▄▂▁                     │
-│                 0% ──────────────────── 45% ─────► 15%         │
-│                                                                │
-│  Hour   Temp   Precip   Wind      Condition                    │
-│  12pm   58°F     0%     8 mph     Partly Cloudy                │
-│   1pm   61°F     0%    10 mph     Partly Cloudy                │
-│   2pm   64°F     5%    12 mph     Mostly Cloudy                │
-│   3pm   67°F    15%    14 mph     Cloudy                       │
-│   4pm   65°F    25%    12 mph     Light Rain                   │
-│   ...                                                          │
-╰────────────────────────────────────────────────────────────────╯
-```
+<img src="assets/hourly.svg" alt="raindrop hourly Seattle" width="700">
 
 ### 10-Day Forecast with Technical Analysis
 
 EMA crossovers, rate-of-change indicators, and trend detection applied to weather data.
 
-```
-╭─ 10-Day Forecast ─ Seattle ────────────────────────────────────╮
-│                                                                │
-│  Trend: Warming (+2.3°F/day) │ EMA: Bullish crossover Day 3   │
-│                                                                │
-│  Day        High   Low    Precip   Condition                   │
-│  Today      62°F   48°F    15%     Partly Cloudy               │
-│  Tomorrow   65°F   50°F    10%     Mostly Sunny     ↑ +3°      │
-│  Wednesday  68°F   52°F     5%     Sunny            ↑ +3°      │
-│  Thursday   71°F   54°F     0%     Sunny            ↑ +3° ★EMA │
-│  Friday     69°F   53°F    20%     Partly Cloudy    ↓ -2°      │
-│  Saturday   64°F   51°F    45%     Rain             ↓ -5°      │
-│  Sunday     61°F   49°F    60%     Rain             ↓ -3°      │
-│  Monday     63°F   50°F    30%     Showers          ↑ +2°      │
-│  Tuesday    66°F   51°F    15%     Partly Cloudy    ↑ +3°      │
-│  Wednesday  68°F   52°F    10%     Mostly Sunny     ↑ +2°      │
-│                                                                │
-╰────────────────────────────────────────────────────────────────╯
-```
+<img src="assets/daily.svg" alt="raindrop daily Seattle" width="700">
 
 ### Route Weather Planning
 
 Plan road trips with weather at every checkpoint along the actual driving route.
 
-```
-╭─ Route Weather: Seattle → San Francisco ───────────────────────╮
-│                                                                │
-│  Distance: 807 mi │ Est. Time: 12h 15m │ Checkpoints: 9       │
-│                                                                │
-│  Temperature: ▃▃▄▅▆▆▇█▇▆  (52°F → 71°F)                      │
-│                                                                │
-│  Mile   Location              Temp   Condition                 │
-│    0    Seattle, WA           52°F   Cloudy                    │
-│  100    Centralia, WA         55°F   Overcast                  │
-│  200    Portland, OR          58°F   Partly Cloudy             │
-│  300    Salem, OR             61°F   Mostly Sunny              │
-│  400    Eugene, OR            63°F   Sunny                     │
-│  500    Grants Pass, OR       67°F   Sunny                     │
-│  600    Redding, CA           71°F   Clear                     │
-│  700    Sacramento, CA        69°F   Partly Cloudy             │
-│  807    San Francisco, CA     62°F   Foggy                     │
-│                                                                │
-╰────────────────────────────────────────────────────────────────╯
-```
+<img src="assets/route.svg" alt="raindrop route Seattle San Francisco" width="700">
+
+### Compare Multiple Locations
+
+<img src="assets/compare.svg" alt="raindrop compare" width="700">
+
+### Air Quality Index
+
+<img src="assets/aqi.svg" alt="raindrop aqi Seattle" width="700">
+
+### Astronomical Data
+
+Moon phases, golden hour, blue hour, and weekly daylight tracking.
+
+<img src="assets/astro.svg" alt="raindrop astro Seattle" width="700">
+
+### Marine Forecasts
+
+<img src="assets/marine.svg" alt="raindrop marine San Diego" width="700">
+
+### Clothing Recommendations
+
+<img src="assets/clothing.svg" alt="raindrop clothing Seattle" width="700">
 
 ### Live Dashboard
 
@@ -171,46 +121,6 @@ Full-screen TUI powered by Rich with automatic refresh.
 ```bash
 raindrop dashboard Seattle --refresh 300
 ```
-
-```
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃  RAINDROP DASHBOARD                       Updated: 2:34:15 PM  ┃
-┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
-┃                                                                ┃
-┃  SEATTLE, WA                                                   ┃
-┃  Partly Cloudy              58°F  (feels like 55°F)            ┃
-┃                                                                ┃
-┃  ┌─ HOURLY ─────────────────────────────────────────────────┐  ┃
-┃  │ Temp:   ▁▂▃▄▅▆▇█▇▆▅▄▃▂▁▁▂▃▄▅  (52° → 67° → 58°)      │  ┃
-┃  │ Precip: ▁▁▁▁▂▃▄▃▂▁▁▂▃▅▆▄▂▁▁▁  (0% → 45% → 10%)       │  ┃
-┃  └──────────────────────────────────────────────────────────┘  ┃
-┃                                                                ┃
-┃  ┌─ 5-DAY ──────────────────────────────────────────────────┐  ┃
-┃  │ Today     62/48°F  15%  Partly Cloudy                    │  ┃
-┃  │ Tomorrow  65/50°F  10%  Mostly Sunny                     │  ┃
-┃  │ Wed       68/52°F   5%  Sunny                            │  ┃
-┃  │ Thu       71/54°F   0%  Sunny                            │  ┃
-┃  │ Fri       69/53°F  20%  Partly Cloudy                    │  ┃
-┃  └──────────────────────────────────────────────────────────┘  ┃
-┃                                                                ┃
-┃  Moon: Waxing Gibbous (78%)  │  Sunset: 8:42 PM               ┃
-┃                                                                ┃
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-```
-
-### And Much More
-
-| Command | What it does |
-|---------|-------------|
-| `astro` | Moon phases, golden/blue hour, weekly daylight chart |
-| `marine` | Wave height, swell period/direction, water temp |
-| `alerts` | NWS weather alerts and advisories (US) |
-| `aqi` | Air quality index with pollutant breakdown |
-| `clothing` | What-to-wear recommendations based on conditions |
-| `history` | Compare today's weather against historical years |
-| `discussion` | NWS Area Forecast Discussion text (US) |
-| `precip` | Precipitation totals and breakdowns |
-| `compare` | Side-by-side weather for multiple locations |
 
 ---
 
@@ -302,6 +212,17 @@ The entire project has only **2 runtime dependencies** (Click and Rich). HTTP, c
 - **Haversine sampling** along OSRM polylines for route weather checkpoints
 - **File-based cache** with SHA256 keys and configurable TTL
 - **14 weather models** selectable: ECMWF, GFS, HRRR, ICON, ARPEGE, AROME, UKMO, GEM, JMA, MetNo, and more
+
+---
+
+## Regenerating Screenshots
+
+The feature screenshots in this README are real CLI output captured as SVGs:
+
+```bash
+python scripts/capture.py            # capture all commands
+python scripts/capture.py current    # capture a specific command
+```
 
 ---
 
