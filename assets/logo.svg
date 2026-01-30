@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <!-- Cloud body -->
+  <ellipse cx="60" cy="48" rx="32" ry="22" fill="#60a5fa"/>
+  <ellipse cx="38" cy="50" rx="22" ry="18" fill="#60a5fa"/>
+  <ellipse cx="82" cy="50" rx="22" ry="18" fill="#60a5fa"/>
+  <rect x="16" y="48" width="88" height="20" rx="0" fill="#60a5fa"/>
+
+  <!-- Cloud highlight -->
+  <ellipse cx="55" cy="40" rx="24" ry="14" fill="#93c5fd" opacity="0.6"/>
+
+  <!-- Raindrops -->
+  <path d="M38 78 Q38 86 38 90 Q38 94 34 94 Q30 94 30 90 Q30 86 34 78 Q36 74 38 78Z" fill="#3b82f6"/>
+  <path d="M60 82 Q60 90 60 94 Q60 98 56 98 Q52 98 52 94 Q52 90 56 82 Q58 78 60 82Z" fill="#3b82f6"/>
+  <path d="M82 78 Q82 86 82 90 Q82 94 78 94 Q74 94 74 90 Q74 86 78 78 Q80 74 82 78Z" fill="#3b82f6"/>
+
+  <!-- Sparkline accent at bottom -->
+  <polyline points="20,110 30,106 40,108 50,102 60,104 70,96 80,98 90,92 100,94"
+    stroke="#2563eb" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <polyline points="20,110 30,106 40,108 50,102 60,104 70,96 80,98 90,92 100,94"
+    stroke="#60a5fa" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.5"/>
+</svg>
