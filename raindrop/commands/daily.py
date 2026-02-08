@@ -9,7 +9,7 @@ from rich.table import Table
 from rich import box
 
 from open_meteo import OpenMeteo
-from settings import get_settings, AVAILABLE_MODELS
+from settings import get_settings, resolve_model
 from raindrop.utils import (
     WEATHER_CODES,
     WEATHER_LABELS,
@@ -73,9 +73,10 @@ def daily(
     country = resolved_country
 
     # Resolve model (CLI flag > settings > auto)
-    model_key = model_name or settings.model
-    api_model = AVAILABLE_MODELS.get(model_key) if model_key else None
-    models = [api_model] if api_model else None
+    try:
+        model_key, models = resolve_model(model_name, settings)
+    except ValueError as e:
+        raise click.ClickException(str(e))
 
     result = geocode(location, country)
 
@@ -108,23 +109,38 @@ def daily(
     wind_symbol = WIND_SYMBOLS[settings.wind_speed_unit]
     precip_symbol = settings.precipitation_unit
 
-    # Get data arrays
-    times = d.time
-    codes = d.weather_code or []
-    highs = d.temperature_2m_max or []
-    lows = d.temperature_2m_min or []
-    precip_probs = d.precipitation_probability_max or []
-    precip_sums = d.precipitation_sum or []
-    wind_maxs = d.wind_speed_10m_max or []
-    uv_maxs = d.uv_index_max or []
+    # Get data arrays, stripping trailing None days (short-range models)
+    raw_highs = d.temperature_2m_max or []
+    raw_lows = d.temperature_2m_min or []
+    valid_days = len(d.time)
+    for i in range(len(d.time) - 1, -1, -1):
+        h_val = raw_highs[i] if i < len(raw_highs) else None
+        l_val = raw_lows[i] if i < len(raw_lows) else None
+        if h_val is not None and l_val is not None:
+            valid_days = i + 1
+            break
+    else:
+        valid_days = 0
+
+    if valid_days == 0:
+        raise click.ClickException("No temperature data returned by this model")
+
+    times = d.time[:valid_days]
+    codes = (d.weather_code or [])[:valid_days]
+    highs = raw_highs[:valid_days]
+    lows = raw_lows[:valid_days]
+    precip_probs = (d.precipitation_probability_max or [])[:valid_days]
+    precip_sums = (d.precipitation_sum or [])[:valid_days]
+    wind_maxs = (d.wind_speed_10m_max or [])[:valid_days]
+    uv_maxs = (d.uv_index_max or [])[:valid_days]
 
     # Calculate technical indicators using average temperature
-    avg_temps = [(h + l) / 2 for h, l in zip(highs, lows)]
+    avg_temps = [((h or 0) + (l or 0)) / 2 for h, l in zip(highs, lows)]
     ema_3 = ema(avg_temps, 3)  # Short-term EMA
     ema_7 = ema(avg_temps, 7)  # Long-term EMA
     roc_vals = calc_roc(avg_temps, 3)  # 3-day rate of change
     volatility = calc_volatility(highs, lows)
-    wind_gusts = d.wind_gusts_10m_max or []
+    wind_gusts = (d.wind_gusts_10m_max or [])[:valid_days]
 
     # JSON output
     if as_json:

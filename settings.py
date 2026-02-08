@@ -21,29 +21,29 @@ class Favorite:
 
 # Available weather models (from Open-Meteo docs)
 # Maps friendly name -> API name
+# Uses "_seamless" variants where available (auto-blends global + regional).
 AVAILABLE_MODELS: dict[str, str] = {
     # ECMWF
     "ecmwf": "ecmwf_ifs025",
-    "ecmwf_aifs": "ecmwf_aifs025",
     # US models (NOAA/NCEP)
-    "gfs": "ncep_gfs025",
+    "gfs": "gfs_seamless",
     "hrrr": "ncep_hrrr_conus",
     # German (DWD)
-    "icon": "dwd_icon",
-    "icon_eu": "dwd_icon_eu",
-    "icon_d2": "dwd_icon_d2",
+    "icon": "icon_seamless",
+    "icon_eu": "icon_eu",
+    "icon_d2": "icon_d2",
     # French
-    "arpege": "meteofrance_arpege_europe",
-    "arome": "meteofrance_arome_france_hd",
+    "arpege": "arpege_seamless",
+    "arome": "arome_seamless",
     # UK
-    "ukmo": "ukmo_global_deterministic_10km",
+    "ukmo": "ukmo_seamless",
     # Canadian
-    "gem": "gem_global",
+    "gem": "gem_seamless",
     "gem_hrdps": "gem_hrdps_continental",
     # Japanese
-    "jma": "jma_gsm",
+    "jma": "jma_seamless",
     # Norwegian
-    "metno": "metno_nordic_pp",
+    "metno": "metno_seamless",
 }
 
 
@@ -118,6 +118,32 @@ class Settings:
             return fav.name, fav.country_code
 
         return location, None
+
+
+def resolve_model(
+    model_name: str | None, settings: Settings
+) -> tuple[str | None, list[str] | None]:
+    """Resolve a weather model from CLI flag or settings.
+
+    Args:
+        model_name: Model name from CLI ``-m`` flag, or None.
+        settings: Current user settings.
+
+    Returns:
+        (model_key, models) where model_key is the friendly name (or None
+        for auto) and models is the API model list for ``om.forecast()``.
+
+    Raises:
+        ValueError: If the model name is not recognized.
+    """
+    model_key = model_name or settings.model
+    if not model_key:
+        return None, None
+    api_model = AVAILABLE_MODELS.get(model_key)
+    if api_model is None:
+        available = ", ".join(sorted(AVAILABLE_MODELS))
+        raise ValueError(f"Unknown model '{model_key}'. Available models: {available}")
+    return model_key, [api_model]
 
 
 def get_settings() -> Settings:

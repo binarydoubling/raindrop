@@ -9,7 +9,7 @@ from rich.table import Table
 from rich import box
 
 from open_meteo import OpenMeteo
-from settings import get_settings, AVAILABLE_MODELS
+from settings import get_settings, resolve_model
 from raindrop.utils import sparkline
 
 om = OpenMeteo()
@@ -63,9 +63,10 @@ def precip(
     country = resolved_country
 
     # Resolve model (CLI flag > settings > auto)
-    model_key = model_name or settings.model
-    api_model = AVAILABLE_MODELS.get(model_key) if model_key else None
-    models = [api_model] if api_model else None
+    try:
+        model_key, models = resolve_model(model_name, settings)
+    except ValueError as e:
+        raise click.ClickException(str(e))
 
     result = geocode(location, country)
 
