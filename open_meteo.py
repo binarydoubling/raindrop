@@ -12,6 +12,102 @@ AIR_QUALITY_BASE_URL = "https://air-quality-api.open-meteo.com/v1"
 HISTORICAL_BASE_URL = "https://archive-api.open-meteo.com/v1"
 NWS_API_BASE_URL = "https://api.weather.gov"
 
+# US state abbreviations -> full names for "City, ST" parsing
+US_STATES: dict[str, str] = {
+    "AL": "Alabama",
+    "AK": "Alaska",
+    "AZ": "Arizona",
+    "AR": "Arkansas",
+    "CA": "California",
+    "CO": "Colorado",
+    "CT": "Connecticut",
+    "DE": "Delaware",
+    "FL": "Florida",
+    "GA": "Georgia",
+    "HI": "Hawaii",
+    "ID": "Idaho",
+    "IL": "Illinois",
+    "IN": "Indiana",
+    "IA": "Iowa",
+    "KS": "Kansas",
+    "KY": "Kentucky",
+    "LA": "Louisiana",
+    "ME": "Maine",
+    "MD": "Maryland",
+    "MA": "Massachusetts",
+    "MI": "Michigan",
+    "MN": "Minnesota",
+    "MS": "Mississippi",
+    "MO": "Missouri",
+    "MT": "Montana",
+    "NE": "Nebraska",
+    "NV": "Nevada",
+    "NH": "New Hampshire",
+    "NJ": "New Jersey",
+    "NM": "New Mexico",
+    "NY": "New York",
+    "NC": "North Carolina",
+    "ND": "North Dakota",
+    "OH": "Ohio",
+    "OK": "Oklahoma",
+    "OR": "Oregon",
+    "PA": "Pennsylvania",
+    "RI": "Rhode Island",
+    "SC": "South Carolina",
+    "SD": "South Dakota",
+    "TN": "Tennessee",
+    "TX": "Texas",
+    "UT": "Utah",
+    "VT": "Vermont",
+    "VA": "Virginia",
+    "WA": "Washington",
+    "WV": "West Virginia",
+    "WI": "Wisconsin",
+    "WY": "Wyoming",
+    "DC": "District of Columbia",
+    "PR": "Puerto Rico",
+    "VI": "Virgin Islands",
+    "GU": "Guam",
+    "AS": "American Samoa",
+    "MP": "Northern Mariana Islands",
+}
+
+# Reverse lookup: full state name (lowercase) -> abbreviation
+_US_STATES_REVERSE: dict[str, str] = {v.lower(): k for k, v in US_STATES.items()}
+
+
+def _parse_location(name: str) -> tuple[str, str | None]:
+    """Parse a location string that may contain a comma-separated qualifier.
+
+    Handles formats like:
+        "Fairbanks, AK"       -> ("Fairbanks", "Alaska")
+        "Fairbanks, Alaska"   -> ("Fairbanks", "Alaska")
+        "Portland, Oregon"    -> ("Portland", "Oregon")
+        "Munich, Germany"     -> ("Munich", "Germany")
+        "Fairbanks"           -> ("Fairbanks", None)
+
+    Returns:
+        (city_name, qualifier) where qualifier is the expanded admin1/country
+        string, or None if no comma was present.
+    """
+    if "," not in name:
+        return name.strip(), None
+
+    parts = [p.strip() for p in name.split(",", 1)]
+    city = parts[0]
+    qualifier = parts[1]
+
+    if not city or not qualifier:
+        return name.strip(), None
+
+    # Expand US state abbreviations (e.g. "AK" -> "Alaska")
+    upper = qualifier.upper()
+    if upper in US_STATES:
+        return city, US_STATES[upper]
+
+    # Already a full name (e.g. "Alaska", "Germany") — pass through
+    return city, qualifier
+
 
 class OpenMeteoError(Exception):
     """Raised when the Open-Meteo API returns an error or request fails."""
@@ -431,8 +527,14 @@ class OpenMeteo:
         """
         Search for locations by name.
 
+        Supports "City, State" and "City, Country" formats (e.g.
+        "Fairbanks, AK", "Portland, Oregon", "Munich, Germany").
+        The qualifier after the comma is used to filter results
+        client-side since the Open-Meteo API only accepts plain
+        city names.
+
         Args:
-            name: Location name or postal code to search for
+            name: Location name, optionally with ", State" or ", Country"
             count: Maximum number of results (1-100)
             language: Language for results (e.g., "en", "de", "fr")
             country_code: ISO 3166-1 alpha-2 country code to filter results (e.g., "US", "DE", "ES")
@@ -443,9 +545,11 @@ class OpenMeteo:
         Raises:
             OpenMeteoError: If request fails or no results found
         """
+        city, qualifier = _parse_location(name)
+
         query = self._build_query(
             {
-                "name": name,
+                "name": city,
                 "count": count,
                 "language": language,
                 "countryCode": country_code,
@@ -459,7 +563,7 @@ class OpenMeteo:
         if not results:
             raise OpenMeteoError(f"No locations found for '{name}'")
 
-        return [
+        parsed = [
             GeocodingResult(
                 id=r["id"],
                 name=r["name"],
@@ -484,6 +588,23 @@ class OpenMeteo:
             )
             for r in results
         ]
+
+        # If the user provided a qualifier (e.g. "AK", "Alaska", "Germany"),
+        # filter results to those matching admin1, admin2, country, or country_code.
+        if qualifier:
+            q = qualifier.lower()
+            filtered = [
+                r
+                for r in parsed
+                if (r.admin1 and r.admin1.lower() == q)
+                or (r.admin2 and r.admin2.lower() == q)
+                or (r.country and r.country.lower() == q)
+                or (r.country_code and r.country_code.lower() == q)
+            ]
+            if filtered:
+                return filtered
+
+        return parsed
 
     def forecast(
         self,
