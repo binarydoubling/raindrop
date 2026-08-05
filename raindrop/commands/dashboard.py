@@ -1,43 +1,42 @@
 """Full-screen TUI dashboard for weather monitoring."""
 
-from datetime import datetime
 import time
+from datetime import datetime
 
 import click
+from rich import box
 from rich.console import Console, Group
 from rich.layout import Layout
+from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
-from rich.live import Live
 from rich.text import Text
-from rich import box
 
-from open_meteo import OpenMeteo, NWSClient
-from settings import get_settings
+from raindrop.commands.common import (
+    format_location,
+    geocode,
+    om,
+    resolve_location_or_fail,
+)
+from raindrop.settings import get_settings
 from raindrop.utils import (
-    WEATHER_CODES,
-    WEATHER_LABELS,
     TEMP_SYMBOLS,
+    WEATHER_LABELS,
     WIND_SYMBOLS,
-    sparkline,
-    format_duration,
     deg_to_compass,
+    find_time_index,
+    format_time,
+    now_in_timezone,
+    sparkline,
 )
 from raindrop.utils.astro import (
-    moon_phase,
-    moon_illumination,
     daylight_duration,
     format_daylight_duration,
+    moon_illumination,
+    moon_phase,
 )
 
-om = OpenMeteo()
-nws = NWSClient()
 console = Console()
-
-
-def geocode(location: str, country: str | None = None):
-    results = om.geocode(location, country_code=country)
-    return results[0]
 
 
 def make_layout() -> Layout:
@@ -70,7 +69,7 @@ def make_layout() -> Layout:
 
 def render_header(location_name: str, timezone: str) -> Panel:
     """Render the header panel."""
-    now = datetime.now()
+    now = now_in_timezone(timezone)
     time_str = now.strftime("%A, %B %d, %Y  %I:%M:%S %p")
 
     grid = Table.grid(expand=True)
@@ -95,7 +94,6 @@ def render_current(weather, settings) -> Panel:
     wind_symbol = WIND_SYMBOLS[settings.wind_speed_unit]
 
     code = c.weather_code or 0
-    condition = WEATHER_CODES.get(code, "Unknown")
     label, color = WEATHER_LABELS.get(code, ("?", "white"))
 
     # Main display
@@ -108,16 +106,12 @@ def render_current(weather, settings) -> Panel:
     temp_text.stylize("bold", 0, len(temp_text))
 
     table.add_row(
-        Text.from_markup(
-            f"[bold white on {color}] {label.upper()} [/bold white on {color}]"
-        ),
+        Text.from_markup(f"[bold white on {color}] {label.upper()} [/bold white on {color}]"),
         "",
     )
     table.add_row(
         Text(f"{c.temperature_2m:.0f}\u00b0", style="bold"),
-        Text(
-            f"Feels like {c.apparent_temperature:.0f}\u00b0{temp_symbol}", style="dim"
-        ),
+        Text(f"Feels like {c.apparent_temperature:.0f}\u00b0{temp_symbol}", style="dim"),
     )
     table.add_row("", "")
 
@@ -141,7 +135,7 @@ def render_current(weather, settings) -> Panel:
         "Cloud",
         f"{c.cloud_cover}%",
         "Pressure",
-        f"{c.pressure_msl:.0f} hPa" if c.pressure_msl else "\u2014",
+        f"{c.pressure_msl:.0f} hPa" if c.pressure_msl is not None else "\u2014",
     )
 
     content = Group(table, Text(""), details)
@@ -155,15 +149,7 @@ def render_hourly(weather, settings) -> Panel:
     if h is None:
         return Panel("No data", title="Hourly Forecast")
 
-    temp_symbol = TEMP_SYMBOLS[settings.temperature_unit]
-
-    now = datetime.now()
-    current_hour = now.strftime("%Y-%m-%dT%H:00")
-
-    try:
-        start_idx = h.time.index(current_hour)
-    except ValueError:
-        start_idx = 0
+    start_idx = find_time_index(h.time, now_in_timezone(weather.timezone))
 
     # Get next 24 hours
     temps = (h.temperature_2m or [])[start_idx : start_idx + 24]
@@ -177,18 +163,12 @@ def render_hourly(weather, settings) -> Panel:
 
     # Temperature sparkline
     temp_clean = [t for t in temps if t is not None]
-    temp_range = (
-        f"{min(temp_clean):.0f}-{max(temp_clean):.0f}\u00b0" if temp_clean else ""
-    )
+    temp_range = f"{min(temp_clean):.0f}-{max(temp_clean):.0f}\u00b0" if temp_clean else ""
     table.add_row("Temp", sparkline(temps), temp_range)
 
     # Precipitation sparkline
     precip_clean = [p for p in precips if p is not None]
-    precip_max = (
-        f"max {max(precip_clean):.0f}%"
-        if precip_clean and max(precip_clean) > 0
-        else ""
-    )
+    precip_max = f"max {max(precip_clean):.0f}%" if precip_clean and max(precip_clean) > 0 else ""
     table.add_row("Precip", sparkline(precips), precip_max)
 
     # Wind sparkline
@@ -200,7 +180,7 @@ def render_hourly(weather, settings) -> Panel:
     hours_row = ""
     for i in [0, 6, 12, 18, 23]:
         if start_idx + i < len(h.time):
-            hr = datetime.fromisoformat(h.time[start_idx + i]).strftime("%-I%p").lower()
+            hr = format_time(datetime.fromisoformat(h.time[start_idx + i]), "{hour}%p")
             hours_row += f"{hr:>4}"
 
     content = Group(table, Text(""), Text(f"[dim]{hours_row}[/dim]"))
@@ -214,15 +194,13 @@ def render_daily(weather, settings) -> Panel:
     if d is None:
         return Panel("No data", title="Daily Forecast")
 
-    temp_symbol = TEMP_SYMBOLS[settings.temperature_unit]
-
     table = Table(box=None, show_header=False, padding=(0, 1))
     table.add_column(style="cyan", width=5)  # Day
     table.add_column(width=8)  # Weather
     table.add_column(justify="right", width=4)  # High
     table.add_column(justify="right", width=4)  # Low
 
-    today = datetime.now().date()
+    today = now_in_timezone(weather.timezone).date()
 
     for i in range(min(7, len(d.time))):
         date = datetime.fromisoformat(d.time[i]).date()
@@ -232,11 +210,7 @@ def render_daily(weather, settings) -> Panel:
         else:
             day_str = date.strftime("%a")
 
-        code = (
-            (d.weather_code or [])[i]
-            if d.weather_code and i < len(d.weather_code)
-            else 0
-        )
+        code = (d.weather_code or [])[i] if d.weather_code and i < len(d.weather_code) else 0
         label, color = WEATHER_LABELS.get(code, ("?", "white"))
 
         high = (
@@ -266,7 +240,7 @@ def render_astro(weather) -> Panel:
     if d is None or not d.sunrise or not d.sunset:
         return Panel("No data", title="Sun & Moon")
 
-    now = datetime.now()
+    now = now_in_timezone(weather.timezone)
     sunrise = datetime.fromisoformat(d.sunrise[0])
     sunset = datetime.fromisoformat(d.sunset[0])
 
@@ -280,8 +254,8 @@ def render_astro(weather) -> Panel:
     table.add_column(style="dim")
     table.add_column()
 
-    table.add_row("Sunrise", sunrise.strftime("%-I:%M %p").lower())
-    table.add_row("Sunset", sunset.strftime("%-I:%M %p").lower())
+    table.add_row("Sunrise", format_time(sunrise))
+    table.add_row("Sunset", format_time(sunset))
     table.add_row("Daylight", format_daylight_duration(daylight))
     table.add_row("", "")
     table.add_row("Moon", f"{phase_symbol} {phase_name}")
@@ -290,10 +264,19 @@ def render_astro(weather) -> Panel:
     return Panel(table, title="[bold]Sun & Moon[/bold]", border_style="magenta")
 
 
-def render_footer() -> Panel:
+def render_footer(refresh: int) -> Panel:
     """Render the footer panel."""
     return Panel(
-        "[dim]Press [bold]Ctrl+C[/bold] to exit  |  Refreshes every 60 seconds  |  Raindrop Weather Dashboard[/dim]",
+        f"[dim]Press [bold]Ctrl+C[/bold] to exit  |  Refreshes every {refresh} seconds  |  Raindrop Weather Dashboard[/dim]",
+        box=box.ROUNDED,
+        style="dim",
+    )
+
+
+def render_error_footer(message: str, refresh: int) -> Panel:
+    """Render a footer with a transient refresh error."""
+    return Panel(
+        f"[red]Refresh failed:[/red] {message}  |  Retrying every {refresh} seconds  |  Ctrl+C to exit",
         box=box.ROUNDED,
         style="dim",
     )
@@ -335,11 +318,14 @@ def fetch_weather_data(geo, settings):
 
 @click.command()
 @click.argument("location", required=False)
+@click.option("-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)")
 @click.option(
-    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
-)
-@click.option(
-    "-r", "--refresh", default=60, help="Refresh interval in seconds (default: 60)"
+    "-r",
+    "--refresh",
+    type=click.IntRange(5, 3600),
+    default=60,
+    show_default=True,
+    help="Refresh interval in seconds",
 )
 def dashboard(location: str | None, country: str | None, refresh: int):
     """Launch full-screen weather dashboard.
@@ -353,44 +339,42 @@ def dashboard(location: str | None, country: str | None, refresh: int):
     """
     settings = get_settings()
 
-    # Resolve location (favorites, defaults)
-    try:
-        resolved_location, resolved_country = settings.resolve_location(location)
-    except ValueError:
-        raise click.ClickException(
-            "No location provided. Use 'raindrop dashboard <location>' or set a default with 'raindrop config set location <name>'"
-        )
-
-    # CLI country flag overrides resolved country
-    if country is not None:
-        resolved_country = country
-
-    location = resolved_location
-    country = resolved_country
+    location, country = resolve_location_or_fail(settings, location, country, "dashboard")
 
     geo = geocode(location, country)
-    location_name = f"{geo.name}, {geo.admin1}, {geo.country}"
+    location_name = format_location(geo)
 
     # Create layout
     layout = make_layout()
 
+    last_weather = None
+
     def update_dashboard():
         """Update all dashboard panels."""
-        weather = fetch_weather_data(geo, settings)
+        nonlocal last_weather
+        try:
+            weather = fetch_weather_data(geo, settings)
+        except Exception as e:
+            if last_weather is None:
+                raise click.ClickException(f"Could not fetch dashboard data: {e}") from e
+            layout["footer"].update(render_error_footer(str(e), refresh))
+            return
+
+        last_weather = weather
 
         layout["header"].update(render_header(location_name, weather.timezone))
         layout["current"].update(render_current(weather, settings))
         layout["hourly"].update(render_hourly(weather, settings))
         layout["daily"].update(render_daily(weather, settings))
         layout["astro"].update(render_astro(weather))
-        layout["footer"].update(render_footer())
+        layout["footer"].update(render_footer(refresh))
 
     # Initial update
     update_dashboard()
 
     # Live display with refresh
     try:
-        with Live(layout, console=console, screen=True, refresh_per_second=1) as live:
+        with Live(layout, console=console, screen=True, refresh_per_second=1):
             last_update = time.time()
             while True:
                 # Check if we need to refresh weather data
@@ -398,11 +382,9 @@ def dashboard(location: str | None, country: str | None, refresh: int):
                     update_dashboard()
                     last_update = time.time()
                 else:
-                    # Just update the header for time
-                    weather = fetch_weather_data(geo, settings)  # For timezone
-                    layout["header"].update(
-                        render_header(location_name, weather.timezone)
-                    )
+                    # Just update the header clock between weather refreshes.
+                    if last_weather is not None:
+                        layout["header"].update(render_header(location_name, last_weather.timezone))
 
                 time.sleep(1)
     except KeyboardInterrupt:

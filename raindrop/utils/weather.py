@@ -121,12 +121,10 @@ def calc_roc(values: list[float], period: int = 3) -> list[float | None]:
 
 def calc_volatility(highs: list[float], lows: list[float]) -> list[float]:
     """Calculate daily temperature range (volatility)."""
-    return [h - l for h, l in zip(highs, lows)]
+    return [high - low for high, low in zip(highs, lows, strict=False)]
 
 
-def trend_signal(
-    value: float, ema_short: float | None, ema_long: float | None
-) -> tuple[str, str]:
+def trend_signal(value: float, ema_short: float | None, ema_long: float | None) -> tuple[str, str]:
     """
     Determine trend signal based on EMA crossover.
     Returns (signal, color).

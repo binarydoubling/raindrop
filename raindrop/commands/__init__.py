@@ -1,22 +1,23 @@
 """CLI commands for raindrop."""
 
-from .current import current
-from .hourly import hourly
-from .daily import daily
-from .aqi import aqi
 from .alerts import alerts
-from .discussion import discussion
-from .precip import precip
-from .compare import compare
-from .history import history
-from .config import config
-from .favorites import fav
+from .aqi import aqi
 from .astro import astro
 from .clothing import clothing
-from .route import route
+from .compare import compare
 from .completions import completions
+from .config import config
+from .current import current
+from .daily import daily
 from .dashboard import dashboard
+from .discussion import discussion
+from .favorites import fav
+from .history import history
+from .hourly import hourly
 from .marine import marine
+from .precip import precip
+from .route import route
+from .window import window
 
 __all__ = [
     "current",
@@ -36,4 +37,5 @@ __all__ = [
     "completions",
     "dashboard",
     "marine",
+    "window",
 ]

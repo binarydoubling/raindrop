@@ -1,13 +1,15 @@
 """Formatting utilities for raindrop CLI output."""
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 # Sparkline characters (Unicode block elements)
 SPARK_CHARS = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
 
 
-def sparkline(values: list[float | int | None]) -> str:
-    """Generate a sparkline string from a list of values."""
+def sparkline(values: Sequence[float | int | None]) -> str:
+    """Generate a sparkline string from a sequence of values."""
     clean_values = [v for v in values if v is not None]
     if not clean_values:
         return ""
@@ -65,9 +67,7 @@ def format_uv(uv: float) -> str:
         return f"{uv:.1f} [magenta](Extreme)[/magenta]"
 
 
-def format_delta(
-    current: float, previous: float, unit: str = "", precision: int = 0
-) -> str:
+def format_delta(current: float, previous: float, unit: str = "", precision: int = 0) -> str:
     """Format a value with its delta from the previous value."""
     delta = current - previous
     if abs(delta) < 1:
@@ -128,13 +128,44 @@ def format_us_aqi(aqi: int | None) -> str:
     return f"[bold red]{aqi} (Hazardous)[/bold red]"
 
 
+def now_in_timezone(timezone: str | None) -> datetime:
+    """Return current datetime in a target timezone, falling back to local time."""
+    if not timezone or timezone == "auto":
+        return datetime.now()
+    try:
+        return datetime.now(ZoneInfo(timezone)).replace(tzinfo=None)
+    except ZoneInfoNotFoundError:
+        return datetime.now()
+
+
+def format_time(dt: datetime, pattern: str = "{hour}:%M %p") -> str:
+    """Format time without platform-specific ``strftime('%-I')``."""
+    hour = str(int(dt.strftime("%I")))
+    return dt.strftime(pattern.replace("{hour}", hour)).lower()
+
+
+def find_time_index(times: Sequence[str], target: datetime) -> int:
+    """Find the first time string at or after a target hour."""
+    if not times:
+        return 0
+
+    target_hour = target.strftime("%Y-%m-%dT%H:00")
+    try:
+        return list(times).index(target_hour)
+    except ValueError:
+        for i, time_value in enumerate(times):
+            if time_value >= target_hour:
+                return i
+        return len(times) - 1
+
+
 def format_alert_time(iso_time: str | None) -> str:
     """Format alert time for display."""
     if not iso_time:
         return "\u2014"
     try:
         dt = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
-        return dt.strftime("%a %-I:%M %p")
+        return format_time(dt, "%a {hour}:%M %p")
     except Exception:
         return iso_time[:16] if iso_time else "\u2014"
 

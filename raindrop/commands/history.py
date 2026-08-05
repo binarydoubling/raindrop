@@ -1,36 +1,33 @@
 """Historical weather comparison command."""
 
-from datetime import datetime
 import json as json_lib
 
 import click
+from rich import box
 from rich.console import Console
 from rich.table import Table
-from rich import box
 
-from open_meteo import OpenMeteo
-from settings import get_settings
+from raindrop.commands.common import format_location, geocode, om, resolve_location_or_fail
+from raindrop.settings import get_settings
 from raindrop.utils import (
-    WEATHER_LABELS,
     TEMP_SYMBOLS,
+    WEATHER_LABELS,
+    now_in_timezone,
 )
 
-om = OpenMeteo()
 console = Console()
-
-
-def geocode(location: str, country: str | None = None):
-    results = om.geocode(location, country_code=country)
-    return results[0]
 
 
 @click.command()
 @click.argument("location", required=False)
+@click.option("-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)")
 @click.option(
-    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
-)
-@click.option(
-    "-y", "--years", default=1, help="How many years back to compare (default: 1)"
+    "-y",
+    "--years",
+    type=click.IntRange(1, 30),
+    default=1,
+    show_default=True,
+    help="How many years back to compare",
 )
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 def history(location: str | None, country: str | None, years: int, as_json: bool):
@@ -42,20 +39,7 @@ def history(location: str | None, country: str | None, years: int, as_json: bool
     """
     settings = get_settings()
 
-    # Resolve location (favorites, defaults)
-    try:
-        resolved_location, resolved_country = settings.resolve_location(location)
-    except ValueError:
-        raise click.ClickException(
-            "No location provided. Use 'raindrop history <location>' or set a default with 'raindrop config set location <name>'"
-        )
-
-    # CLI country flag overrides resolved country
-    if country is not None:
-        resolved_country = country
-
-    location = resolved_location
-    country = resolved_country
+    location, country = resolve_location_or_fail(settings, location, country, "history")
 
     result = geocode(location, country)
 
@@ -63,7 +47,7 @@ def history(location: str | None, country: str | None, years: int, as_json: bool
     precip_symbol = settings.precipitation_unit
 
     # Get today's date
-    today = datetime.now().date()
+    today = now_in_timezone(result.timezone).date()
     today_str = today.strftime("%Y-%m-%d")
 
     # Get current weather
@@ -158,9 +142,7 @@ def history(location: str | None, country: str | None, years: int, as_json: bool
         return
 
     # Display
-    console.print(
-        f"\n[bold cyan]{result.name}, {result.admin1}, {result.country}[/bold cyan]"
-    )
+    console.print(f"\n[bold cyan]{format_location(result)}[/bold cyan]")
     console.print(f"[dim]Historical comparison for {today.strftime('%B %d')}[/dim]\n")
 
     # Table
@@ -178,13 +160,13 @@ def history(location: str | None, country: str | None, years: int, as_json: bool
     table.add_row(
         f"[bold yellow]{current_data['year']}[/bold yellow]",
         f"{current_data['temp_max']:.0f}\u00b0{temp_symbol}"
-        if current_data["temp_max"]
+        if current_data["temp_max"] is not None
         else "\u2014",
         f"{current_data['temp_min']:.0f}\u00b0{temp_symbol}"
-        if current_data["temp_min"]
+        if current_data["temp_min"] is not None
         else "\u2014",
         f"{current_data['precip']:.1f} {precip_symbol}"
-        if current_data["precip"]
+        if current_data["precip"] is not None
         else "\u2014",
         f"[{color}]{label}[/{color}]",
         "[bold]Today[/bold]",
@@ -211,12 +193,12 @@ def history(location: str | None, country: str | None, years: int, as_json: bool
         table.add_row(
             str(h["year"]),
             f"{h['temp_max']:.0f}\u00b0{temp_symbol}"
-            if h.get("temp_max")
+            if h.get("temp_max") is not None
             else "\u2014",
             f"{h['temp_min']:.0f}\u00b0{temp_symbol}"
-            if h.get("temp_min")
+            if h.get("temp_min") is not None
             else "\u2014",
-            f"{h['precip']:.1f} {precip_symbol}" if h.get("precip") else "\u2014",
+            f"{h['precip']:.1f} {precip_symbol}" if h.get("precip") is not None else "\u2014",
             f"[{color}]{label}[/{color}]",
             diff_str,
         )
@@ -225,9 +207,7 @@ def history(location: str | None, country: str | None, years: int, as_json: bool
 
     # Summary stats
     if historical_data and today_max is not None:
-        hist_maxes = [
-            h["temp_max"] for h in historical_data if h.get("temp_max") is not None
-        ]
+        hist_maxes = [h["temp_max"] for h in historical_data if h.get("temp_max") is not None]
         if hist_maxes:
             avg_max = sum(hist_maxes) / len(hist_maxes)
             diff_from_avg = today_max - avg_max
@@ -240,6 +220,4 @@ def history(location: str | None, country: str | None, years: int, as_json: bool
                     f"\n[dim]Today is [cyan]{abs(diff_from_avg):.1f}\u00b0{temp_symbol} cooler[/cyan] than average for this date[/dim]"
                 )
             else:
-                console.print(
-                    "\n[dim]Today matches the historical average for this date[/dim]"
-                )
+                console.print("\n[dim]Today matches the historical average for this date[/dim]")

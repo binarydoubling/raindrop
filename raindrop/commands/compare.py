@@ -3,25 +3,19 @@
 import json as json_lib
 
 import click
+from rich import box
 from rich.console import Console
 from rich.table import Table
-from rich import box
 
-from open_meteo import OpenMeteo
-from settings import get_settings
+from raindrop.commands.common import geocode, om
+from raindrop.settings import get_settings
 from raindrop.utils import (
-    WEATHER_LABELS,
     TEMP_SYMBOLS,
+    WEATHER_LABELS,
     WIND_SYMBOLS,
 )
 
-om = OpenMeteo()
 console = Console()
-
-
-def geocode(location: str, country: str | None = None):
-    results = om.geocode(location, country_code=country)
-    return results[0]
 
 
 @click.command()
@@ -142,8 +136,10 @@ def compare(locations: tuple[str, ...], as_json: bool):
             weather_str = f"[{color}]{label}[/{color}]"
 
             # Temperature with color
-            temp = r.get("temperature", 0)
-            if settings.temperature_unit == "fahrenheit":
+            temp = r.get("temperature")
+            if temp is None:
+                temp_str = "\u2014"
+            elif settings.temperature_unit == "fahrenheit":
                 if temp >= 90:
                     temp_str = f"[red]{temp:.0f}\u00b0{temp_symbol}[/red]"
                 elif temp >= 75:
@@ -162,33 +158,27 @@ def compare(locations: tuple[str, ...], as_json: bool):
                 else:
                     temp_str = f"{temp:.0f}\u00b0{temp_symbol}"
 
-            feels = r.get("feels_like", 0)
-            feels_str = f"{feels:.0f}\u00b0{temp_symbol}"
+            feels = r.get("feels_like")
+            feels_str = f"{feels:.0f}\u00b0{temp_symbol}" if feels is not None else "\u2014"
 
-            wind = r.get("wind_speed", 0)
-            wind_str = f"{wind:.0f} {wind_symbol}"
+            wind = r.get("wind_speed")
+            wind_str = f"{wind:.0f} {wind_symbol}" if wind is not None else "\u2014"
 
-            humidity = r.get("humidity", 0)
-            humidity_str = f"{humidity}%"
+            humidity = r.get("humidity")
+            humidity_str = f"{humidity}%" if humidity is not None else "\u2014"
 
-            table.add_row(
-                loc_str, temp_str, feels_str, weather_str, wind_str, humidity_str
-            )
+            table.add_row(loc_str, temp_str, feels_str, weather_str, wind_str, humidity_str)
 
     console.print(table)
 
     # Find extremes
-    valid = [r for r in results if "error" not in r]
+    valid = [r for r in results if "error" not in r and r.get("temperature") is not None]
     if len(valid) >= 2:
-        temps = [(r["name"], r.get("temperature", 0)) for r in valid]
+        temps = [(r["name"], r["temperature"]) for r in valid]
         hottest = max(temps, key=lambda x: x[1])
         coldest = min(temps, key=lambda x: x[1])
         diff = hottest[1] - coldest[1]
 
-        console.print(
-            f"\n[dim]Warmest: {hottest[0]} ({hottest[1]:.0f}\u00b0{temp_symbol})[/dim]"
-        )
-        console.print(
-            f"[dim]Coolest: {coldest[0]} ({coldest[1]:.0f}\u00b0{temp_symbol})[/dim]"
-        )
+        console.print(f"\n[dim]Warmest: {hottest[0]} ({hottest[1]:.0f}\u00b0{temp_symbol})[/dim]")
+        console.print(f"[dim]Coolest: {coldest[0]} ({coldest[1]:.0f}\u00b0{temp_symbol})[/dim]")
         console.print(f"[dim]Difference: {diff:.0f}\u00b0{temp_symbol}[/dim]")

@@ -1,36 +1,29 @@
 """Air quality command."""
 
-from datetime import datetime
 import json as json_lib
 
 import click
+from rich import box
 from rich.console import Console
 from rich.table import Table
-from rich import box
 
-from open_meteo import OpenMeteo
-from settings import get_settings
+from raindrop.commands.common import format_location, geocode, om, resolve_location_or_fail
+from raindrop.settings import get_settings
 from raindrop.utils import (
-    sparkline,
-    format_uv,
+    find_time_index,
     format_pollutant,
     format_us_aqi,
+    format_uv,
+    now_in_timezone,
+    sparkline,
 )
 
-om = OpenMeteo()
 console = Console()
-
-
-def geocode(location: str, country: str | None = None):
-    results = om.geocode(location, country_code=country)
-    return results[0]
 
 
 @click.command()
 @click.argument("location", required=False)
-@click.option(
-    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
-)
+@click.option("-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 def aqi(location: str | None, country: str | None, as_json: bool):
     """Show air quality index and pollutants.
@@ -39,20 +32,7 @@ def aqi(location: str | None, country: str | None, as_json: bool):
     """
     settings = get_settings()
 
-    # Resolve location (favorites, defaults)
-    try:
-        resolved_location, resolved_country = settings.resolve_location(location)
-    except ValueError:
-        raise click.ClickException(
-            "No location provided. Use 'raindrop aqi <location>' or set a default with 'raindrop config set location <name>'"
-        )
-
-    # CLI country flag overrides resolved country
-    if country is not None:
-        resolved_country = country
-
-    location = resolved_location
-    country = resolved_country
+    location, country = resolve_location_or_fail(settings, location, country, "aqi")
 
     result = geocode(location, country)
 
@@ -112,9 +92,7 @@ def aqi(location: str | None, country: str | None, as_json: bool):
         return
 
     # Location header
-    console.print(
-        f"\n[bold cyan]{result.name}, {result.admin1}, {result.country}[/bold cyan]"
-    )
+    console.print(f"\n[bold cyan]{format_location(result)}[/bold cyan]")
     console.print("[dim]Air Quality Index[/dim]\n")
 
     # Main AQI display
@@ -143,13 +121,8 @@ def aqi(location: str | None, country: str | None, as_json: bool):
 
     # Hourly sparkline if available
     if h and h.us_aqi:
-        # Find current hour index
-        now = datetime.now()
-        current_hour_str = now.strftime("%Y-%m-%dT%H:00")
-        try:
-            start_idx = h.time.index(current_hour_str)
-        except ValueError:
-            start_idx = 0
+        # Find current hour index in the target location timezone.
+        start_idx = find_time_index(h.time, now_in_timezone(aq.timezone))
 
         # Get next 24 hours of AQI
         aqi_vals = h.us_aqi[start_idx : start_idx + 24]

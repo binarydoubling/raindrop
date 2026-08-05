@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="#installation"><img src="https://img.shields.io/badge/python-3.12+-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python 3.12+"></a>
-  <a href="#commands"><img src="https://img.shields.io/badge/commands-17-22c55e?style=flat-square" alt="17 Commands"></a>
+  <a href="#commands"><img src="https://img.shields.io/badge/commands-18-22c55e?style=flat-square" alt="18 Commands"></a>
   <a href="https://open-meteo.com/"><img src="https://img.shields.io/badge/API-Open--Meteo-f97316?style=flat-square" alt="Open-Meteo"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-MIT-a855f7?style=flat-square" alt="MIT License"></a>
   <a href="#"><img src="https://img.shields.io/badge/dependencies-2-64748b?style=flat-square" alt="2 Dependencies"></a>
@@ -59,6 +59,7 @@ pip install -e .
 
 ```bash
 raindrop current Seattle                          # current conditions
+raindrop window Seattle                           # sensory weather scene
 raindrop hourly "New York" --spark --hours 12     # sparkline forecast
 raindrop daily Portland                           # 10-day with trend analysis
 raindrop dashboard Seattle --refresh 300          # live full-screen TUI
@@ -71,6 +72,15 @@ raindrop current home                             # use it anywhere
 ---
 
 ## Features
+
+### Weather Window
+
+Translate weather variables into the feel of standing outside: air texture, sky, light, motion, surfaces, and distance.
+
+```bash
+raindrop window Seattle
+raindrop outside Tokyo --compact
+```
 
 ### Current Weather
 
@@ -128,6 +138,7 @@ raindrop dashboard Seattle --refresh 300
 
 | Command | Description | Example |
 |---------|-------------|---------|
+| `window` / `outside` | First-person weather scene | `raindrop window Seattle` |
 | `current` | Current conditions | `raindrop current Seattle` |
 | `hourly` | Hourly forecast (48h) | `raindrop hourly Seattle --spark` |
 | `daily` | 10-day forecast with trends | `raindrop daily Seattle` |
@@ -142,24 +153,27 @@ raindrop dashboard Seattle --refresh 300
 | `history` | Compare with past years | `raindrop history Seattle` |
 | `discussion` | NWS forecast discussion | `raindrop discussion Seattle` |
 | `precip` | Precipitation totals | `raindrop precip Seattle --days 7` |
-| `favorites` | Manage saved locations | `raindrop favorites list` |
+| `fav` / `favorites` | Manage saved locations | `raindrop favorites list` |
 | `config` | View/edit settings | `raindrop config show` |
 | `completions` | Shell completions | `raindrop completions bash` |
 
 ### Global Options
 
 ```
---units metric|imperial    Set temperature and distance units (default: imperial)
---no-cache                 Bypass cache for fresh data
---json                     Output raw JSON for scripting
+--no-cache                 Bypass the API response cache for fresh data
+--version                  Show the installed version
 --help                     Show help for any command
 ```
+
+Most data commands also support `--json` for scripting and `-c/--country` for ISO country filtering.
+Use `raindrop config set units metric|imperial` to switch unit presets.
 
 ---
 
 ## Configuration
 
-Settings live at `~/.config/raindrop/config.json`.
+Settings live at `$RAINDROP_CONFIG_DIR/config.json`, `$XDG_CONFIG_HOME/raindrop/config.json`, or `~/.config/raindrop/config.json`.
+API responses are cached under `$RAINDROP_CACHE_DIR`, `$XDG_CACHE_HOME/raindrop`, or `~/.cache/raindrop`.
 
 ```bash
 raindrop config show                  # view current settings
@@ -171,9 +185,13 @@ raindrop config cache --clear         # clear cache
 
 | Setting | Values | Default | Description |
 |---------|--------|---------|-------------|
-| `units` | `imperial`, `metric` | `imperial` | Temperature and distance units |
+| `units` | `imperial`, `metric` | `imperial` | Shortcut that updates the unit fields below |
+| `temperature_unit` | `fahrenheit`, `celsius` | `fahrenheit` | Temperature display unit |
+| `wind_speed_unit` | `mph`, `kmh`, `ms`, `kn` | `mph` | Wind speed display unit |
+| `precipitation_unit` | `mm`, `inch` | `mm` | Precipitation display unit |
 | `location` | any string | none | Default location |
-| `cache_ttl` | seconds | `600` | Cache lifetime |
+| `country_code` | ISO 3166-1 alpha-2 | none | Default country filter |
+| `model` | `auto` or `raindrop config models` value | `auto` | Open-Meteo forecast model |
 
 ---
 
@@ -206,11 +224,12 @@ The entire project has only **2 runtime dependencies** (Click and Rich). HTTP, c
 
 ### Technical Highlights
 
+- **Weather window scene engine** that infers air texture, sky, light, motion, surface, and horizon from combined variables
 - **Sparklines** via Unicode block characters (`▁▂▃▄▅▆▇█`)
 - **EMA crossovers** and rate-of-change analysis on temperature data
 - **Pure-Python astronomy** — moon phases, Julian day, daylight duration with no external libs
 - **Haversine sampling** along OSRM polylines for route weather checkpoints
-- **File-based cache** with SHA256 keys and configurable TTL
+- **File-based cache** with SHA256 keys and endpoint-specific TTLs
 - **14 weather models** selectable: ECMWF, GFS, HRRR, ICON, ARPEGE, AROME, UKMO, GEM, JMA, MetNo, and more
 
 ---
@@ -231,8 +250,10 @@ python scripts/capture.py current    # capture a specific command
 ```bash
 git clone https://github.com/binarydoubling/raindrop.git
 cd raindrop
-pip install -e ".[dev]"
-pytest
+uv sync
+uv run pytest
+uv run ruff check
+uv run pyright
 ```
 
 ---

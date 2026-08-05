@@ -1,20 +1,14 @@
 """Favorites management commands."""
 
 import click
+from rich import box
 from rich.console import Console
 from rich.table import Table
-from rich import box
 
-from open_meteo import OpenMeteo
-from settings import get_settings, Favorite
+from raindrop.commands.common import format_location, geocode
+from raindrop.settings import Favorite, get_settings
 
-om = OpenMeteo()
 console = Console()
-
-
-def geocode(location: str, country: str | None = None):
-    results = om.geocode(location, country_code=country)
-    return results[0]
 
 
 @click.group()
@@ -30,9 +24,7 @@ def fav_list():
 
     if not settings.favorites:
         console.print("[dim]No favorites saved yet.[/dim]")
-        console.print(
-            "[dim]Use 'raindrop fav add <alias> <location>' to add one.[/dim]"
-        )
+        console.print("[dim]Use 'raindrop fav add <alias> <location>' to add one.[/dim]")
         return
 
     table = Table(show_header=True, box=box.ROUNDED, header_style="bold")
@@ -49,9 +41,7 @@ def fav_list():
 @fav.command("add")
 @click.argument("alias")
 @click.argument("location")
-@click.option(
-    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
-)
+@click.option("-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)")
 def fav_add(alias: str, location: str, country: str | None):
     """Add a favorite location.
 
@@ -69,15 +59,14 @@ def fav_add(alias: str, location: str, country: str | None):
     except Exception as e:
         raise click.ClickException(f"Could not find location: {e}")
 
+    favorite_name = f"{result.name}, {result.admin1}" if result.admin1 else result.name
     settings.favorites[alias] = Favorite(
-        name=result.name,
-        country_code=country.upper() if country else None,
+        name=favorite_name,
+        country_code=result.country_code or (country.upper() if country else None),
     )
     settings.save()
 
-    console.print(
-        f"[green]Added favorite '{alias}' -> {result.name}, {result.admin1}, {result.country}[/green]"
-    )
+    console.print(f"[green]Added favorite '{alias}' -> {format_location(result)}[/green]")
 
 
 @fav.command("remove")

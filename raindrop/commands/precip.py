@@ -1,32 +1,37 @@
 """Precipitation forecast command."""
 
-from datetime import datetime, timedelta
 import json as json_lib
+from datetime import datetime, timedelta
 
 import click
+from rich import box
 from rich.console import Console
 from rich.table import Table
-from rich import box
 
-from open_meteo import OpenMeteo
-from settings import get_settings, resolve_model
-from raindrop.utils import sparkline
+from raindrop.commands.common import (
+    format_location,
+    geocode,
+    om,
+    resolve_location_or_fail,
+    resolve_model_or_fail,
+)
+from raindrop.settings import get_settings
+from raindrop.utils import find_time_index, now_in_timezone, sparkline
 
-om = OpenMeteo()
 console = Console()
-
-
-def geocode(location: str, country: str | None = None):
-    results = om.geocode(location, country_code=country)
-    return results[0]
 
 
 @click.command()
 @click.argument("location", required=False)
+@click.option("-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)")
 @click.option(
-    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
+    "-n",
+    "--days",
+    type=click.IntRange(1, 16),
+    default=7,
+    show_default=True,
+    help="Number of days to show",
 )
-@click.option("-n", "--days", default=7, help="Number of days to show (default: 7)")
 @click.option(
     "-m",
     "--model",
@@ -47,26 +52,9 @@ def precip(
     """
     settings = get_settings()
 
-    # Resolve location (favorites, defaults)
-    try:
-        resolved_location, resolved_country = settings.resolve_location(location)
-    except ValueError:
-        raise click.ClickException(
-            "No location provided. Use 'raindrop precip <location>' or set a default with 'raindrop config set location <name>'"
-        )
+    location, country = resolve_location_or_fail(settings, location, country, "precip")
 
-    # CLI country flag overrides resolved country
-    if country is not None:
-        resolved_country = country
-
-    location = resolved_location
-    country = resolved_country
-
-    # Resolve model (CLI flag > settings > auto)
-    try:
-        model_key, models = resolve_model(model_name, settings)
-    except ValueError as e:
-        raise click.ClickException(str(e))
+    model_key, models = resolve_model_or_fail(model_name, settings)
 
     result = geocode(location, country)
 
@@ -118,15 +106,9 @@ def precip(
             daily_data.append(
                 {
                     "date": times[i],
-                    "precipitation_sum": precip_sums[i]
-                    if i < len(precip_sums)
-                    else None,
-                    "precipitation_probability": precip_probs[i]
-                    if i < len(precip_probs)
-                    else None,
-                    "precipitation_hours": precip_hours[i]
-                    if i < len(precip_hours)
-                    else None,
+                    "precipitation_sum": precip_sums[i] if i < len(precip_sums) else None,
+                    "precipitation_probability": precip_probs[i] if i < len(precip_probs) else None,
+                    "precipitation_hours": precip_hours[i] if i < len(precip_hours) else None,
                     "rain_sum": rain_sums[i] if i < len(rain_sums) else None,
                     "snowfall_sum": snow_sums[i] if i < len(snow_sums) else None,
                     "weather_code": codes[i] if i < len(codes) else None,
@@ -157,16 +139,12 @@ def precip(
         return
 
     # Header
-    console.print(
-        f"\n[bold cyan]{result.name}, {result.admin1}, {result.country}[/bold cyan]"
-    )
+    console.print(f"\n[bold cyan]{format_location(result)}[/bold cyan]")
     console.print(f"[dim]{days}-day precipitation forecast[/dim]\n")
 
     # Summary
     if total_precip > 0:
-        console.print(
-            f"[bold]Total Expected:[/bold] {total_precip:.1f} {precip_symbol}"
-        )
+        console.print(f"[bold]Total Expected:[/bold] {total_precip:.1f} {precip_symbol}")
         if total_rain > 0:
             console.print(f"  [blue]Rain:[/blue] {total_rain:.1f} {precip_symbol}")
         if total_snow > 0:
@@ -186,7 +164,7 @@ def precip(
     table.add_column("Hours", justify="right")
     table.add_column("Accumulation", justify="right")
 
-    today = datetime.now().date()
+    today = now_in_timezone(weather.timezone).date()
     running_total = 0.0
 
     for i in range(min(len(times), days)):
@@ -253,12 +231,7 @@ def precip(
 
     # Hourly sparkline for next 24h
     if h and h.precipitation_probability:
-        now = datetime.now()
-        current_hour_str = now.strftime("%Y-%m-%dT%H:00")
-        try:
-            start_idx = h.time.index(current_hour_str)
-        except ValueError:
-            start_idx = 0
+        start_idx = find_time_index(h.time, now_in_timezone(weather.timezone))
 
         probs = h.precipitation_probability[start_idx : start_idx + 24]
         amounts = (h.precipitation or [])[start_idx : start_idx + 24]

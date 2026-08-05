@@ -1,38 +1,34 @@
 """Astronomical data command (sun, moon, golden hour)."""
 
-from datetime import datetime, timedelta
 import json as json_lib
+from datetime import datetime
 
 import click
+from rich import box
 from rich.console import Console
 from rich.table import Table
-from rich import box
 
-from open_meteo import OpenMeteo
-from settings import get_settings
+from raindrop.commands.common import format_location, geocode, om, resolve_location_or_fail
+from raindrop.settings import get_settings
+from raindrop.utils import format_time as format_clock_time
+from raindrop.utils import now_in_timezone
 from raindrop.utils.astro import (
-    moon_phase,
-    moon_illumination,
-    next_moon_phase,
-    golden_hour,
     blue_hour,
     daylight_duration,
     format_daylight_duration,
+    golden_hour,
+    moon_illumination,
+    moon_phase,
+    next_moon_phase,
     solar_noon,
 )
 
-om = OpenMeteo()
 console = Console()
-
-
-def geocode(location: str, country: str | None = None):
-    results = om.geocode(location, country_code=country)
-    return results[0]
 
 
 def format_time(dt: datetime) -> str:
     """Format datetime as time string."""
-    return dt.strftime("%-I:%M %p").lower()
+    return format_clock_time(dt)
 
 
 def format_time_until(now: datetime, target: datetime) -> str:
@@ -49,9 +45,7 @@ def format_time_until(now: datetime, target: datetime) -> str:
 
 @click.command()
 @click.argument("location", required=False)
-@click.option(
-    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
-)
+@click.option("-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 def astro(location: str | None, country: str | None, as_json: bool):
     """Show astronomical data: sun times, moon phase, golden hour.
@@ -63,20 +57,7 @@ def astro(location: str | None, country: str | None, as_json: bool):
     """
     settings = get_settings()
 
-    # Resolve location (favorites, defaults)
-    try:
-        resolved_location, resolved_country = settings.resolve_location(location)
-    except ValueError:
-        raise click.ClickException(
-            "No location provided. Use 'raindrop astro <location>' or set a default with 'raindrop config set location <name>'"
-        )
-
-    # CLI country flag overrides resolved country
-    if country is not None:
-        resolved_country = country
-
-    location = resolved_location
-    country = resolved_country
+    location, country = resolve_location_or_fail(settings, location, country, "astro")
 
     result = geocode(location, country)
 
@@ -98,7 +79,7 @@ def astro(location: str | None, country: str | None, as_json: bool):
     if d is None or not d.sunrise or not d.sunset:
         raise click.ClickException("No astronomical data returned")
 
-    now = datetime.now()
+    now = now_in_timezone(weather.timezone)
     today = now.date()
 
     # Parse today's sun times
@@ -173,9 +154,7 @@ def astro(location: str | None, country: str | None, as_json: bool):
                     "date": d.time[i],
                     "sunrise": d.sunrise[i],
                     "sunset": d.sunset[i],
-                    "daylight_seconds": d.daylight_duration[i]
-                    if d.daylight_duration
-                    else None,
+                    "daylight_seconds": d.daylight_duration[i] if d.daylight_duration else None,
                 }
                 for i in range(min(7, len(d.time)))
             ],
@@ -184,9 +163,7 @@ def astro(location: str | None, country: str | None, as_json: bool):
         return
 
     # Display
-    console.print(
-        f"\n[bold cyan]{result.name}, {result.admin1}, {result.country}[/bold cyan]"
-    )
+    console.print(f"\n[bold cyan]{format_location(result)}[/bold cyan]")
     console.print(f"[dim]Astronomical Data for {today.strftime('%A, %B %d')}[/dim]\n")
 
     # Sun section
@@ -218,7 +195,7 @@ def astro(location: str | None, country: str | None, as_json: bool):
     elif now < sunset:
         console.print(f"  [yellow]Sunset {format_time_until(now, sunset)}[/yellow]")
     else:
-        console.print(f"  [dim]Sun has set[/dim]")
+        console.print("  [dim]Sun has set[/dim]")
 
     console.print()
 
@@ -245,9 +222,7 @@ def astro(location: str | None, country: str | None, as_json: bool):
 
     # Moon section
     console.print("[bold white]Moon[/bold white]")
-    console.print(
-        f"  {phase_symbol} [bold]{phase_name}[/bold] ({illumination:.0f}% illuminated)"
-    )
+    console.print(f"  {phase_symbol} [bold]{phase_name}[/bold] ({illumination:.0f}% illuminated)")
     console.print()
 
     # Upcoming phases

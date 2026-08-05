@@ -1,39 +1,38 @@
 """Current weather command."""
 
-from datetime import datetime
 import json as json_lib
+from datetime import datetime
 
 import click
+from rich import box
 from rich.console import Console
 from rich.table import Table
-from rich import box
 
-from open_meteo import OpenMeteo
-from settings import get_settings, resolve_model
+from raindrop.commands.common import (
+    format_location,
+    geocode,
+    om,
+    resolve_location_or_fail,
+    resolve_model_or_fail,
+)
+from raindrop.settings import get_settings
 from raindrop.utils import (
-    WEATHER_CODES,
     TEMP_SYMBOLS,
+    WEATHER_CODES,
     WIND_SYMBOLS,
-    format_duration,
-    format_visibility,
-    format_uv,
     deg_to_compass,
+    format_duration,
+    format_time,
+    format_uv,
+    format_visibility,
 )
 
-om = OpenMeteo()
 console = Console()
-
-
-def geocode(location: str, country: str | None = None):
-    results = om.geocode(location, country_code=country)
-    return results[0]
 
 
 @click.command()
 @click.argument("location", required=False)
-@click.option(
-    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
-)
+@click.option("-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)")
 @click.option(
     "-m",
     "--model",
@@ -55,26 +54,9 @@ def current(
     """
     settings = get_settings()
 
-    # Resolve location (favorites, defaults)
-    try:
-        resolved_location, resolved_country = settings.resolve_location(location)
-    except ValueError:
-        raise click.ClickException(
-            "No location provided. Use 'raindrop current <location>' or set a default with 'raindrop config set location <name>'"
-        )
+    location, country = resolve_location_or_fail(settings, location, country, "current")
 
-    # CLI country flag overrides resolved country
-    if country is not None:
-        resolved_country = country
-
-    location = resolved_location
-    country = resolved_country
-
-    # Resolve model (CLI flag > settings > auto)
-    try:
-        model_key, models = resolve_model(model_name, settings)
-    except ValueError as e:
-        raise click.ClickException(str(e))
+    model_key, models = resolve_model_or_fail(model_name, settings)
 
     result = geocode(location, country)
 
@@ -143,9 +125,7 @@ def current(
                 "visibility": c.visibility,
                 "uv_index": c.uv_index,
                 "weather_code": c.weather_code,
-                "weather_description": WEATHER_CODES.get(
-                    c.weather_code or 0, "Unknown"
-                ),
+                "weather_description": WEATHER_CODES.get(c.weather_code or 0, "Unknown"),
                 "is_day": c.is_day,
             },
             "daily": {
@@ -179,9 +159,7 @@ def current(
     sunset = datetime.fromisoformat(d.sunset[0]) if d and d.sunset else None
 
     # Location header
-    console.print(
-        f"\n[bold cyan]{result.name}, {result.admin1}, {result.country}[/bold cyan]"
-    )
+    console.print(f"\n[bold cyan]{format_location(result)}[/bold cyan]")
 
     # Coordinates and metadata
     lat_dir = "N" if result.latitude >= 0 else "S"
@@ -221,7 +199,7 @@ def current(
         "Humidity",
         f"{c.relative_humidity_2m}%",
         "Dew point",
-        f"{c.dew_point_2m}\u00b0{temp_symbol}" if c.dew_point_2m else "\u2014",
+        f"{c.dew_point_2m}\u00b0{temp_symbol}" if c.dew_point_2m is not None else "\u2014",
     )
 
     # Row 3: Wind speed + direction / Gusts
@@ -241,13 +219,13 @@ def current(
     # Row 4: Pressure (MSL) / Surface pressure
     table.add_row(
         "Pressure (MSL)",
-        f"{c.pressure_msl} hPa" if c.pressure_msl else "\u2014",
+        f"{c.pressure_msl} hPa" if c.pressure_msl is not None else "\u2014",
         "Surface",
-        f"{c.surface_pressure} hPa" if c.surface_pressure else "\u2014",
+        f"{c.surface_pressure} hPa" if c.surface_pressure is not None else "\u2014",
     )
 
     # Row 5: Visibility / Cloud cover
-    visibility_str = format_visibility(c.visibility) if c.visibility else "\u2014"
+    visibility_str = format_visibility(c.visibility) if c.visibility is not None else "\u2014"
     table.add_row(
         "Visibility",
         visibility_str,
@@ -277,8 +255,8 @@ def current(
         sun_table.add_column("label2", style="dim")
         sun_table.add_column("value2", style="bold")
 
-        sunrise_str = sunrise.strftime("%-I:%M %p").lower()
-        sunset_str = sunset.strftime("%-I:%M %p").lower()
+        sunrise_str = format_time(sunrise)
+        sunset_str = format_time(sunset)
 
         # Calculate time until/since sunrise/sunset
         if now < sunrise:

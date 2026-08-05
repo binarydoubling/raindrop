@@ -1,39 +1,37 @@
 """Route weather command - weather along a driving route with turn-by-turn directions."""
 
-from datetime import datetime, timedelta
-from math import radians, cos, sin, asin, sqrt
 import json as json_lib
-import urllib.request
+import urllib.error
 import urllib.parse
+import urllib.request
+from datetime import datetime, timedelta
+from math import asin, cos, radians, sin, sqrt
 
 import click
+from rich import box
 from rich.console import Console
 from rich.table import Table
-from rich import box
 
-from open_meteo import OpenMeteo
-from settings import get_settings
+from raindrop.commands.common import geocode, om
+from raindrop.settings import get_settings
 from raindrop.utils import (
-    WEATHER_CODES,
-    WEATHER_LABELS,
     TEMP_SYMBOLS,
+    WEATHER_LABELS,
     WIND_SYMBOLS,
+    find_time_index,
+    format_time,
+    now_in_timezone,
     sparkline,
 )
 
-om = OpenMeteo()
 console = Console()
+progress_console = Console(stderr=True)
 
 # OSRM public demo server
 OSRM_BASE_URL = "https://router.project-osrm.org"
 
 # Weather check interval in miles
 WEATHER_INTERVAL_MILES = 50
-
-
-def geocode(location: str, country: str | None = None):
-    results = om.geocode(location, country_code=country)
-    return results[0]
 
 
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -262,6 +260,9 @@ def get_weather_checkpoints(
     Generate weather checkpoints at regular intervals along the route.
     Returns list of checkpoints with coordinates and cumulative distance/time.
     """
+    if interval_mi <= 0:
+        raise ValueError("interval_mi must be greater than 0")
+
     checkpoints = []
     next_checkpoint_mi = 0
 
@@ -270,14 +271,10 @@ def get_weather_checkpoints(
         seg_end_mi = seg_start_mi + seg["distance_mi"]
 
         # Check if any checkpoints fall within this segment
-        while (
-            next_checkpoint_mi <= seg_end_mi and next_checkpoint_mi <= total_distance_mi
-        ):
+        while next_checkpoint_mi <= seg_end_mi and next_checkpoint_mi <= total_distance_mi:
             # Calculate position within segment
             if seg["distance_mi"] > 0:
-                progress_in_seg = (next_checkpoint_mi - seg_start_mi) / seg[
-                    "distance_mi"
-                ]
+                progress_in_seg = (next_checkpoint_mi - seg_start_mi) / seg["distance_mi"]
             else:
                 progress_in_seg = 0
 
@@ -364,23 +361,14 @@ def get_weather_for_point(
         temperature_unit=settings.temperature_unit,
         wind_speed_unit=settings.wind_speed_unit,
         precipitation_unit=settings.precipitation_unit,
-        forecast_days=2,
+        forecast_days=16,
     )
 
     h = weather.hourly
     if not h or not h.time:
         return {}
 
-    target_hour = arrival_time.strftime("%Y-%m-%dT%H:00")
-
-    try:
-        idx = h.time.index(target_hour)
-    except ValueError:
-        idx = 0
-        for i, t in enumerate(h.time):
-            if t >= target_hour:
-                idx = i
-                break
+    idx = find_time_index(h.time, arrival_time)
 
     return {
         "temperature": h.temperature_2m[idx]
@@ -398,9 +386,7 @@ def get_weather_for_point(
         "wind_speed": h.wind_speed_10m[idx]
         if h.wind_speed_10m and idx < len(h.wind_speed_10m)
         else None,
-        "visibility": h.visibility[idx]
-        if h.visibility and idx < len(h.visibility)
-        else None,
+        "visibility": h.visibility[idx] if h.visibility and idx < len(h.visibility) else None,
     }
 
 
@@ -418,12 +404,15 @@ def format_duration(seconds: float) -> str:
 @click.argument("destination")
 @click.option("-d", "--depart", help="Departure time (HH:MM, default: now)")
 @click.option(
-    "-i", "--interval", default=50, help="Weather check interval in miles (default: 50)"
+    "-i",
+    "--interval",
+    type=click.IntRange(1, 1000),
+    default=50,
+    show_default=True,
+    help="Weather check interval in miles",
 )
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
-@click.option(
-    "--brief", is_flag=True, help="Show condensed output without full directions"
-)
+@click.option("--brief", is_flag=True, help="Show condensed output without full directions")
 def route(
     origin: str,
     destination: str,
@@ -448,14 +437,20 @@ def route(
     temp_symbol = TEMP_SYMBOLS[settings.temperature_unit]
     wind_symbol = WIND_SYMBOLS[settings.wind_speed_unit]
 
-    # Parse departure time
-    now = datetime.now()
+    # Geocode origin and destination
+    progress_console.print("[dim]Finding locations...[/dim]")
+    try:
+        origin_geo = geocode(origin)
+        dest_geo = geocode(destination)
+    except Exception as e:
+        raise click.ClickException(f"Could not find location: {e}") from e
+
+    # Parse departure time in the origin location timezone.
+    now = now_in_timezone(origin_geo.timezone)
     if depart:
         try:
             hour, minute = map(int, depart.split(":"))
-            departure_time = now.replace(
-                hour=hour, minute=minute, second=0, microsecond=0
-            )
+            departure_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
             if departure_time < now:
                 departure_time += timedelta(days=1)
         except ValueError:
@@ -463,16 +458,8 @@ def route(
     else:
         departure_time = now
 
-    # Geocode origin and destination
-    console.print("[dim]Finding locations...[/dim]")
-    try:
-        origin_geo = geocode(origin)
-        dest_geo = geocode(destination)
-    except Exception as e:
-        raise click.ClickException(f"Could not find location: {e}")
-
     # Get real route from OSRM
-    console.print("[dim]Calculating route...[/dim]")
+    progress_console.print("[dim]Calculating route...[/dim]")
     try:
         route_data = get_osrm_route(
             (origin_geo.latitude, origin_geo.longitude),
@@ -494,13 +481,11 @@ def route(
     checkpoints = get_weather_checkpoints(consolidated, total_distance_mi, interval)
 
     # Fetch weather for each checkpoint
-    console.print("[dim]Fetching weather data...[/dim]")
+    progress_console.print("[dim]Fetching weather data...[/dim]")
     for cp in checkpoints:
         arrival_time = departure_time + timedelta(seconds=cp["cumulative_duration_s"])
         cp["arrival_time"] = arrival_time
-        cp["weather"] = get_weather_for_point(
-            cp["lat"], cp["lon"], arrival_time, settings
-        )
+        cp["weather"] = get_weather_for_point(cp["lat"], cp["lon"], arrival_time, settings)
 
     # JSON output
     if as_json:
@@ -557,12 +542,10 @@ def route(
     # === DISPLAY ===
     arrival = departure_time + total_duration
 
+    console.print(f"\n[bold cyan]Route: {origin_geo.name} \u2192 {dest_geo.name}[/bold cyan]")
     console.print(
-        f"\n[bold cyan]Route: {origin_geo.name} \u2192 {dest_geo.name}[/bold cyan]"
-    )
-    console.print(
-        f"[dim]{total_distance_mi:.0f} miles \u00b7 {format_duration(total_duration_s)} \u00b7 "
-        f"Depart {departure_time.strftime('%-I:%M %p')} \u2192 Arrive {arrival.strftime('%-I:%M %p')}[/dim]\n"
+        f"[dim]{total_distance_mi:.0f} miles · {format_duration(total_duration_s)} · "
+        f"Depart {format_time(departure_time)} → Arrive {format_time(arrival)}[/dim]\n"
     )
 
     # Turn-by-turn directions (unless --brief)
@@ -594,9 +577,7 @@ def route(
         console.print()
 
     # Weather along route
-    console.print(
-        f"[bold]Weather Along Route[/bold] [dim](every {interval} miles)[/dim]\n"
-    )
+    console.print(f"[bold]Weather Along Route[/bold] [dim](every {interval} miles)[/dim]\n")
 
     weather_table = Table(box=box.ROUNDED, show_header=True, header_style="bold")
     weather_table.add_column("Mile", justify="right", width=5)
@@ -623,7 +604,7 @@ def route(
             mile_str = f"{cp['mile']:.0f}"
 
         # ETA
-        eta_str = cp["arrival_time"].strftime("%-I:%M %p").lower()
+        eta_str = format_time(cp["arrival_time"])
 
         # Road (truncate if needed)
         road = cp["road"]
@@ -667,9 +648,7 @@ def route(
         else:
             wind_str = "\u2014"
 
-        weather_table.add_row(
-            mile_str, eta_str, road, weather_str, temp_str, precip_str, wind_str
-        )
+        weather_table.add_row(mile_str, eta_str, road, weather_str, temp_str, precip_str, wind_str)
 
     console.print(weather_table)
 
@@ -693,10 +672,6 @@ def route(
     has_precip = any(p and p > 40 for p in precip_probs)
 
     if has_heavy_precip and not weather_concerns:
-        console.print(
-            "\n[yellow]Note: High chance of precipitation along parts of route.[/yellow]"
-        )
+        console.print("\n[yellow]Note: High chance of precipitation along parts of route.[/yellow]")
     elif has_precip and not weather_concerns:
-        console.print(
-            "\n[dim]Tip: Some chance of precipitation - consider rain gear.[/dim]"
-        )
+        console.print("\n[dim]Tip: Some chance of precipitation - consider rain gear.[/dim]")

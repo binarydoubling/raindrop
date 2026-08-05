@@ -1,42 +1,48 @@
 """Daily forecast command."""
 
-from datetime import datetime, timedelta
 import json as json_lib
+from datetime import datetime, timedelta
 
 import click
+from rich import box
 from rich.console import Console
 from rich.table import Table
-from rich import box
 
-from open_meteo import OpenMeteo
-from settings import get_settings, resolve_model
+from raindrop.commands.common import (
+    format_location,
+    geocode,
+    om,
+    resolve_location_or_fail,
+    resolve_model_or_fail,
+)
+from raindrop.settings import get_settings
 from raindrop.utils import (
+    TEMP_SYMBOLS,
     WEATHER_CODES,
     WEATHER_LABELS,
-    TEMP_SYMBOLS,
     WIND_SYMBOLS,
-    ema,
     calc_roc,
     calc_volatility,
-    trend_signal,
+    ema,
+    now_in_timezone,
     roc_signal,
+    trend_signal,
 )
 
-om = OpenMeteo()
 console = Console()
-
-
-def geocode(location: str, country: str | None = None):
-    results = om.geocode(location, country_code=country)
-    return results[0]
 
 
 @click.command()
 @click.argument("location", required=False)
+@click.option("-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)")
 @click.option(
-    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
+    "-n",
+    "--days",
+    type=click.IntRange(1, 16),
+    default=10,
+    show_default=True,
+    help="Number of days to show",
 )
-@click.option("-n", "--days", default=10, help="Number of days to show (default: 10)")
 @click.option(
     "-m",
     "--model",
@@ -57,26 +63,9 @@ def daily(
     """
     settings = get_settings()
 
-    # Resolve location (favorites, defaults)
-    try:
-        resolved_location, resolved_country = settings.resolve_location(location)
-    except ValueError:
-        raise click.ClickException(
-            "No location provided. Use 'raindrop daily <location>' or set a default with 'raindrop config set location <name>'"
-        )
+    location, country = resolve_location_or_fail(settings, location, country, "daily")
 
-    # CLI country flag overrides resolved country
-    if country is not None:
-        resolved_country = country
-
-    location = resolved_location
-    country = resolved_country
-
-    # Resolve model (CLI flag > settings > auto)
-    try:
-        model_key, models = resolve_model(model_name, settings)
-    except ValueError as e:
-        raise click.ClickException(str(e))
+    model_key, models = resolve_model_or_fail(model_name, settings)
 
     result = geocode(location, country)
 
@@ -135,7 +124,7 @@ def daily(
     uv_maxs = (d.uv_index_max or [])[:valid_days]
 
     # Calculate technical indicators using average temperature
-    avg_temps = [((h or 0) + (l or 0)) / 2 for h, l in zip(highs, lows)]
+    avg_temps = [((high or 0) + (low or 0)) / 2 for high, low in zip(highs, lows, strict=False)]
     ema_3 = ema(avg_temps, 3)  # Short-term EMA
     ema_7 = ema(avg_temps, 7)  # Long-term EMA
     roc_vals = calc_roc(avg_temps, 3)  # 3-day rate of change
@@ -160,12 +149,8 @@ def daily(
                     "temperature_avg": avg_temps[i] if i < len(avg_temps) else None,
                     "weather_code": code,
                     "weather_description": WEATHER_CODES.get(code, "Unknown"),
-                    "precipitation_probability": precip_probs[i]
-                    if i < len(precip_probs)
-                    else None,
-                    "precipitation_sum": precip_sums[i]
-                    if i < len(precip_sums)
-                    else None,
+                    "precipitation_probability": precip_probs[i] if i < len(precip_probs) else None,
+                    "precipitation_sum": precip_sums[i] if i < len(precip_sums) else None,
                     "wind_speed_max": wind_maxs[i] if i < len(wind_maxs) else None,
                     "wind_gusts_max": wind_gusts[i] if i < len(wind_gusts) else None,
                     "uv_index_max": uv_maxs[i] if i < len(uv_maxs) else None,
@@ -199,12 +184,8 @@ def daily(
         return
 
     # Location header
-    console.print(
-        f"\n[bold cyan]{result.name}, {result.admin1}, {result.country}[/bold cyan]"
-    )
-    console.print(
-        f"[dim]{days}-day forecast \u00b7 Model: {model_key or 'auto'}[/dim]\n"
-    )
+    console.print(f"\n[bold cyan]{format_location(result)}[/bold cyan]")
+    console.print(f"[dim]{days}-day forecast \u00b7 Model: {model_key or 'auto'}[/dim]\n")
 
     # Main forecast table
     table = Table(box=box.ROUNDED, show_header=True, header_style="bold")
@@ -218,7 +199,7 @@ def daily(
     table.add_column("Trend", justify="center")
     table.add_column("\u0394 3d", justify="right")  # 3-day rate of change
 
-    today = datetime.now().date()
+    today = now_in_timezone(weather.timezone).date()
 
     for i in range(min(len(times), days)):
         date = datetime.fromisoformat(times[i]).date()
@@ -274,9 +255,9 @@ def daily(
         if prob == 0:
             precip_str = "[dim]\u2014[/dim]"
         elif prob >= 70:
-            precip_str = f"[bold blue]{prob}%[/bold blue] {amount:.1f}{precip_symbol}"
+            precip_str = f"[bold blue]{prob}%[/bold blue] {amount:.2f}{precip_symbol}"
         elif prob >= 40:
-            precip_str = f"[blue]{prob}%[/blue] {amount:.1f}{precip_symbol}"
+            precip_str = f"[blue]{prob}%[/blue] {amount:.2f}{precip_symbol}"
         else:
             precip_str = f"[dim]{prob}%[/dim]"
 
@@ -320,9 +301,7 @@ def daily(
         latest_ema3 = ema_3[-1]
         latest_ema7 = ema_7[-1]
         if latest_ema3 is not None and latest_ema7 is not None:
-            trend_txt, trend_color = trend_signal(
-                avg_temps[-1], latest_ema3, latest_ema7
-            )
+            trend_txt, trend_color = trend_signal(avg_temps[-1], latest_ema3, latest_ema7)
             ema_diff = latest_ema3 - latest_ema7
             console.print(
                 f"[dim]EMA(3):[/dim] {latest_ema3:.1f}\u00b0  "
@@ -352,14 +331,9 @@ def daily(
         else:
             vol_trend = "[dim]Stable[/dim]"
         console.print(
-            f"[dim]Avg Range:[/dim] {recent_vol:.1f}\u00b0  "
-            f"[dim]Volatility:[/dim] {vol_trend}"
+            f"[dim]Avg Range:[/dim] {recent_vol:.1f}\u00b0  [dim]Volatility:[/dim] {vol_trend}"
         )
 
     # Legend
-    console.print(
-        "\n[dim]Trend: EMA(3)/EMA(7) crossover \u00b7 \u0394 3d: 3-day temperature change[/dim]"
-    )
-    console.print(
-        "[dim]\u25b2 Hot \u00b7 \u2197 Warming \u00b7 \u2192 Stable \u00b7 \u2198 Cooling \u00b7 \u25bc Cold[/dim]"
-    )
+    console.print("\n[dim]Trend: EMA(3)/EMA(7) crossover · Δ 3d: 3-day temperature change[/dim]")
+    console.print("[dim]▲ Hot · ↗ Warming · → Stable · ↘ Cooling · ▼ Cold[/dim]")

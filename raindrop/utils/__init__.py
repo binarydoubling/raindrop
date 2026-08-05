@@ -1,31 +1,33 @@
 """Utility functions for raindrop."""
 
 from .formatting import (
-    sparkline,
-    format_duration,
-    format_visibility,
-    format_uv,
-    format_delta,
-    format_precip_chance,
-    format_pollutant,
-    format_us_aqi,
-    format_alert_time,
     deg_to_compass,
+    find_time_index,
+    format_alert_time,
+    format_delta,
+    format_duration,
+    format_pollutant,
+    format_precip_chance,
+    format_time,
+    format_us_aqi,
+    format_uv,
+    format_visibility,
+    now_in_timezone,
+    sparkline,
 )
-
 from .weather import (
+    SEVERITY_COLORS,
+    TEMP_SYMBOLS,
+    URGENCY_COLORS,
+    US_AQI_LEVELS,
     WEATHER_CODES,
     WEATHER_LABELS,
-    TEMP_SYMBOLS,
     WIND_SYMBOLS,
-    US_AQI_LEVELS,
-    SEVERITY_COLORS,
-    URGENCY_COLORS,
-    ema,
     calc_roc,
     calc_volatility,
-    trend_signal,
+    ema,
     roc_signal,
+    trend_signal,
 )
 
 __all__ = [
@@ -39,6 +41,9 @@ __all__ = [
     "format_pollutant",
     "format_us_aqi",
     "format_alert_time",
+    "find_time_index",
+    "format_time",
+    "now_in_timezone",
     "deg_to_compass",
     # weather
     "WEATHER_CODES",

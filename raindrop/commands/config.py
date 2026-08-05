@@ -1,12 +1,21 @@
 """Configuration commands."""
 
+from typing import cast
+
 import click
 from rich.console import Console
 from rich.table import Table
-from rich import box
 
-from settings import get_settings, AVAILABLE_MODELS
 from raindrop.cache import get_cache
+from raindrop.open_meteo import PrecipitationUnit, TemperatureUnit, WindSpeedUnit
+from raindrop.settings import (
+    AVAILABLE_MODELS,
+    PRECIPITATION_UNITS,
+    TEMPERATURE_UNITS,
+    WIND_SPEED_UNITS,
+    get_settings,
+    normalize_country_code,
+)
 
 console = Console()
 
@@ -46,42 +55,55 @@ def config_set(key: str, value: str):
     Available settings:
       location           Default location name
       country_code       Default country code (e.g., US, ES, DE)
+      units              imperial or metric shortcut
       temperature_unit   celsius or fahrenheit
       wind_speed_unit    kmh, ms, mph, or kn
       precipitation_unit mm or inch
-      model              Weather model (see 'weather config models')
+      model              Weather model (see 'raindrop config models')
     """
     settings = get_settings()
+
+    normalized_value = value.lower()
 
     if key == "location":
         settings.location = value
     elif key == "country_code":
-        settings.country_code = value.upper()
+        try:
+            settings.country_code = normalize_country_code(value)
+        except ValueError as e:
+            raise click.ClickException(str(e)) from e
+    elif key == "units":
+        if normalized_value == "metric":
+            settings.temperature_unit = "celsius"
+            settings.wind_speed_unit = "kmh"
+            settings.precipitation_unit = "mm"
+        elif normalized_value == "imperial":
+            settings.temperature_unit = "fahrenheit"
+            settings.wind_speed_unit = "mph"
+            settings.precipitation_unit = "inch"
+        else:
+            raise click.ClickException("units must be 'metric' or 'imperial'")
     elif key == "temperature_unit":
-        if value not in ("celsius", "fahrenheit"):
-            raise click.ClickException(
-                "temperature_unit must be 'celsius' or 'fahrenheit'"
-            )
-        settings.temperature_unit = value  # type: ignore
+        if normalized_value not in TEMPERATURE_UNITS:
+            raise click.ClickException("temperature_unit must be 'celsius' or 'fahrenheit'")
+        settings.temperature_unit = cast(TemperatureUnit, normalized_value)
     elif key == "wind_speed_unit":
-        if value not in ("kmh", "ms", "mph", "kn"):
-            raise click.ClickException(
-                "wind_speed_unit must be 'kmh', 'ms', 'mph', or 'kn'"
-            )
-        settings.wind_speed_unit = value  # type: ignore
+        if normalized_value not in WIND_SPEED_UNITS:
+            raise click.ClickException("wind_speed_unit must be 'kmh', 'ms', 'mph', or 'kn'")
+        settings.wind_speed_unit = cast(WindSpeedUnit, normalized_value)
     elif key == "precipitation_unit":
-        if value not in ("mm", "inch"):
+        if normalized_value not in PRECIPITATION_UNITS:
             raise click.ClickException("precipitation_unit must be 'mm' or 'inch'")
-        settings.precipitation_unit = value  # type: ignore
+        settings.precipitation_unit = cast(PrecipitationUnit, normalized_value)
     elif key == "model":
-        if value == "auto":
+        if normalized_value == "auto":
             settings.model = None
-        elif value not in AVAILABLE_MODELS:
+        elif normalized_value not in AVAILABLE_MODELS:
             raise click.ClickException(
-                f"Unknown model: {value}. Run 'weather config models' to see available models."
+                f"Unknown model: {value}. Run 'raindrop config models' to see available models."
             )
         else:
-            settings.model = value
+            settings.model = normalized_value
     else:
         raise click.ClickException(f"Unknown setting: {key}")
 
@@ -101,7 +123,7 @@ def config_unset(key: str):
         settings.country_code = None
     elif key == "model":
         settings.model = None
-    elif key in ("temperature_unit", "wind_speed_unit", "precipitation_unit"):
+    elif key in ("units", "temperature_unit", "wind_speed_unit", "precipitation_unit"):
         raise click.ClickException(f"Cannot unset {key}, use 'config set' to change it")
     else:
         raise click.ClickException(f"Unknown setting: {key}")
@@ -114,14 +136,14 @@ def config_unset(key: str):
 def config_models():
     """List available weather models."""
     console.print("\n[bold]Available weather models:[/bold]\n")
-    console.print("[dim]Use 'weather config set model <name>' to set a default.[/dim]")
+    console.print("[dim]Use 'raindrop config set model <name>' to set a default.[/dim]")
     console.print("[dim]Or use '--model <name>' flag on any command.[/dim]\n")
 
     console.print("[cyan]Auto (default)[/cyan]")
     console.print("  [dim]Omit --model to let Open-Meteo choose the best model[/dim]\n")
 
     models_by_category = {
-        "ECMWF (European)": ["ecmwf", "ecmwf_aifs"],
+        "ECMWF (European)": ["ecmwf"],
         "US (NOAA)": ["gfs", "hrrr"],
         "German (DWD)": ["icon", "icon_eu", "icon_d2"],
         "French (Meteo-France)": ["arpege", "arome"],
@@ -157,9 +179,7 @@ def config_cache(clear: bool):
     table.add_column("key", style="dim")
     table.add_column("value")
 
-    table.add_row(
-        "Enabled", "[green]Yes[/green]" if stats["enabled"] else "[red]No[/red]"
-    )
+    table.add_row("Enabled", "[green]Yes[/green]" if stats["enabled"] else "[red]No[/red]")
     table.add_row("Location", stats.get("cache_dir", "N/A"))
     table.add_row("Total entries", str(stats.get("entries", 0)))
     table.add_row("Valid entries", str(stats.get("valid", 0)))

@@ -1,23 +1,17 @@
 """NWS forecast discussion command."""
 
+import json as json_lib
 import re
 from datetime import datetime as dt
-import json as json_lib
 
 import click
 from rich.console import Console
 
-from open_meteo import OpenMeteo, NWSClient
-from settings import get_settings
+from raindrop.commands.common import format_location, geocode, nws, resolve_location_or_fail
+from raindrop.settings import get_settings
+from raindrop.utils import format_time
 
-om = OpenMeteo()
-nws = NWSClient()
 console = Console()
-
-
-def geocode(location: str, country: str | None = None):
-    results = om.geocode(location, country_code=country)
-    return results[0]
 
 
 def format_discussion(text: str) -> str:
@@ -48,9 +42,7 @@ def format_discussion(text: str) -> str:
             continue
 
         # Issued/Updated timestamps
-        if line.strip().startswith("Issued at") or line.strip().startswith(
-            "Updated at"
-        ):
+        if line.strip().startswith("Issued at") or line.strip().startswith("Updated at"):
             formatted_lines.append(f"[dim]{line.strip()}[/dim]")
             continue
 
@@ -76,9 +68,7 @@ def format_discussion(text: str) -> str:
 
 @click.command()
 @click.argument("location", required=False)
-@click.option(
-    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
-)
+@click.option("-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)")
 @click.option("--raw", is_flag=True, help="Show raw unformatted text")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 def discussion(location: str | None, country: str | None, raw: bool, as_json: bool):
@@ -91,20 +81,7 @@ def discussion(location: str | None, country: str | None, raw: bool, as_json: bo
     """
     settings = get_settings()
 
-    # Resolve location (favorites, defaults)
-    try:
-        resolved_location, resolved_country = settings.resolve_location(location)
-    except ValueError:
-        raise click.ClickException(
-            "No location provided. Use 'raindrop discussion <location>' or set a default with 'raindrop config set location <name>'"
-        )
-
-    # CLI country flag overrides resolved country
-    if country is not None:
-        resolved_country = country
-
-    location = resolved_location
-    country = resolved_country
+    location, country = resolve_location_or_fail(settings, location, country, "discussion")
 
     result = geocode(location, country)
 
@@ -125,7 +102,7 @@ def discussion(location: str | None, country: str | None, raw: bool, as_json: bo
     # Parse issuance time
     try:
         issued = dt.fromisoformat(disc.issuance_time.replace("Z", "+00:00"))
-        issued_str = issued.strftime("%B %d, %Y at %-I:%M %p %Z")
+        issued_str = f"{issued.strftime('%B %d, %Y at')} {format_time(issued)} {issued.strftime('%Z')}".strip()
     except Exception:
         issued_str = disc.issuance_time
 
@@ -153,7 +130,7 @@ def discussion(location: str | None, country: str | None, raw: bool, as_json: bo
         return
 
     # Header
-    console.print(f"\n[bold cyan]{result.name}, {result.admin1}[/bold cyan]")
+    console.print(f"\n[bold cyan]{format_location(result, include_country=False)}[/bold cyan]")
     console.print(f"[dim]NWS {office.id} Area Forecast Discussion[/dim]")
     console.print(f"[dim]Issued: {issued_str}[/dim]\n")
 

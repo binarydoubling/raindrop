@@ -4,24 +4,15 @@ import json as json_lib
 
 import click
 from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
-from rich import box
 
-from open_meteo import OpenMeteo
-from settings import get_settings
+from raindrop.commands.common import format_location, geocode, om, resolve_location_or_fail
+from raindrop.settings import get_settings
 from raindrop.utils import (
-    WEATHER_CODES,
     TEMP_SYMBOLS,
+    WEATHER_CODES,
 )
 
-om = OpenMeteo()
 console = Console()
-
-
-def geocode(location: str, country: str | None = None):
-    results = om.geocode(location, country_code=country)
-    return results[0]
 
 
 def get_temp_category(temp: float, unit: str) -> str:
@@ -64,7 +55,6 @@ def get_clothing_recommendations(
     is_snowy = weather_code in [71, 73, 75]
     is_stormy = weather_code in [95, 96, 99]
     is_foggy = weather_code in [45, 48]
-    is_sunny = weather_code in [0, 1]
 
     # Convert wind to mph for logic
     if unit == "celsius":
@@ -184,14 +174,10 @@ def get_clothing_recommendations(
         if uv_index >= 6:
             recommendations["accessories"].append("Sunglasses")
             recommendations["accessories"].append("Wide-brimmed hat")
-            recommendations["tips"].append(
-                f"UV Index {uv_index:.0f}: Apply SPF 30+ sunscreen"
-            )
+            recommendations["tips"].append(f"UV Index {uv_index:.0f}: Apply SPF 30+ sunscreen")
         elif uv_index >= 3:
             recommendations["accessories"].append("Sunglasses")
-            recommendations["tips"].append(
-                f"UV Index {uv_index:.0f}: Consider sunscreen"
-            )
+            recommendations["tips"].append(f"UV Index {uv_index:.0f}: Consider sunscreen")
 
     # Humidity considerations
     if is_humid and temp_cat in ["warm", "hot"]:
@@ -202,9 +188,7 @@ def get_clothing_recommendations(
 
 @click.command()
 @click.argument("location", required=False)
-@click.option(
-    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
-)
+@click.option("-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 def clothing(location: str | None, country: str | None, as_json: bool):
     """Get clothing suggestions based on current weather.
@@ -216,20 +200,7 @@ def clothing(location: str | None, country: str | None, as_json: bool):
     """
     settings = get_settings()
 
-    # Resolve location (favorites, defaults)
-    try:
-        resolved_location, resolved_country = settings.resolve_location(location)
-    except ValueError:
-        raise click.ClickException(
-            "No location provided. Use 'raindrop clothing <location>' or set a default with 'raindrop config set location <name>'"
-        )
-
-    # CLI country flag overrides resolved country
-    if country is not None:
-        resolved_country = country
-
-    location = resolved_location
-    country = resolved_country
+    location, country = resolve_location_or_fail(settings, location, country, "clothing")
 
     result = geocode(location, country)
 
@@ -290,7 +261,7 @@ def clothing(location: str | None, country: str | None, as_json: bool):
         return
 
     # Display
-    console.print(f"\n[bold cyan]{result.name}, {result.admin1}[/bold cyan]")
+    console.print(f"\n[bold cyan]{format_location(result, include_country=False)}[/bold cyan]")
     console.print(
         f"[dim]{c.temperature_2m:.0f}\u00b0{temp_symbol} (feels like {c.apparent_temperature:.0f}\u00b0{temp_symbol}) \u00b7 {weather_desc}[/dim]\n"
     )

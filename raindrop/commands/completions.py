@@ -45,11 +45,17 @@ _raindrop() {
         'clothing:Get clothing suggestions based on weather'
         'compare:Compare weather across multiple locations'
         'config:View and manage settings'
+        'completions:Generate shell completion scripts'
+        'dashboard:Launch full-screen weather dashboard'
         'discussion:Show NWS Area Forecast Discussion'
         'fav:Manage favorite locations'
+        'favorites:Manage favorite locations'
         'history:Compare today with past years'
+        'marine:Show marine/ocean weather forecast'
+        'outside:Peer through a weather window into a location'
         'precip:Show precipitation forecast'
         'route:Show weather conditions along a route'
+        'window:Peer through a weather window into a location'
     )
     
     local -a config_subcommands
@@ -58,6 +64,7 @@ _raindrop() {
         'set:Set a configuration value'
         'unset:Unset a configuration value'
         'models:List available weather models'
+        'cache:View or clear API cache'
     )
     
     local -a fav_subcommands
@@ -82,10 +89,10 @@ _raindrop() {
                 config)
                     _describe -t subcommands 'config subcommands' config_subcommands
                     ;;
-                fav)
+                fav|favorites)
                     _describe -t subcommands 'fav subcommands' fav_subcommands
                     ;;
-                current|hourly|daily|aqi|alerts|astro|clothing|discussion|history|precip)
+                current|hourly|daily|aqi|alerts|astro|clothing|discussion|history|marine|outside|precip|window)
                     _arguments \\
                         '1:location:' \\
                         '-c[Country code]:country:' \\
@@ -103,11 +110,11 @@ _raindrop() {
                     _arguments \\
                         '1:origin:' \\
                         '2:destination:' \\
-                        '-s[Number of stops]:stops:' \\
-                        '--stops[Number of stops]:stops:' \\
                         '-d[Departure time]:time:' \\
                         '--depart[Departure time]:time:' \\
-                        '--speed[Average speed]:speed:' \\
+                        '-i[Weather check interval in miles]:interval:' \\
+                        '--interval[Weather check interval in miles]:interval:' \\
+                        '--brief[Condensed output]' \\
                         '--json[Output as JSON]' \\
                         '--help[Show help]'
                     ;;
@@ -135,22 +142,29 @@ complete -c raindrop -n __fish_use_subcommand -a astro -d 'Show astronomical dat
 complete -c raindrop -n __fish_use_subcommand -a clothing -d 'Get clothing suggestions'
 complete -c raindrop -n __fish_use_subcommand -a compare -d 'Compare locations'
 complete -c raindrop -n __fish_use_subcommand -a config -d 'Manage settings'
+complete -c raindrop -n __fish_use_subcommand -a completions -d 'Generate completions'
+complete -c raindrop -n __fish_use_subcommand -a dashboard -d 'Live dashboard'
 complete -c raindrop -n __fish_use_subcommand -a discussion -d 'Show NWS discussion'
 complete -c raindrop -n __fish_use_subcommand -a fav -d 'Manage favorites'
+complete -c raindrop -n __fish_use_subcommand -a favorites -d 'Manage favorites'
 complete -c raindrop -n __fish_use_subcommand -a history -d 'Historical comparison'
+complete -c raindrop -n __fish_use_subcommand -a marine -d 'Marine forecast'
+complete -c raindrop -n __fish_use_subcommand -a outside -d 'Weather window'
 complete -c raindrop -n __fish_use_subcommand -a precip -d 'Precipitation forecast'
 complete -c raindrop -n __fish_use_subcommand -a route -d 'Route weather'
+complete -c raindrop -n __fish_use_subcommand -a window -d 'Weather window'
 
 # Config subcommands
 complete -c raindrop -n "__fish_seen_subcommand_from config" -a show -d 'Show settings'
 complete -c raindrop -n "__fish_seen_subcommand_from config" -a set -d 'Set a value'
 complete -c raindrop -n "__fish_seen_subcommand_from config" -a unset -d 'Unset a value'
 complete -c raindrop -n "__fish_seen_subcommand_from config" -a models -d 'List models'
+complete -c raindrop -n "__fish_seen_subcommand_from config" -a cache -d 'View cache'
 
 # Fav subcommands
-complete -c raindrop -n "__fish_seen_subcommand_from fav" -a list -d 'List favorites'
-complete -c raindrop -n "__fish_seen_subcommand_from fav" -a add -d 'Add favorite'
-complete -c raindrop -n "__fish_seen_subcommand_from fav" -a remove -d 'Remove favorite'
+complete -c raindrop -n "__fish_seen_subcommand_from fav favorites" -a list -d 'List favorites'
+complete -c raindrop -n "__fish_seen_subcommand_from fav favorites" -a add -d 'Add favorite'
+complete -c raindrop -n "__fish_seen_subcommand_from fav favorites" -a remove -d 'Remove favorite'
 
 # Common options
 complete -c raindrop -s c -l country -d 'Country code (e.g., US)'
@@ -166,9 +180,9 @@ complete -c raindrop -n "__fish_seen_subcommand_from hourly" -l spark -d 'Show s
 complete -c raindrop -n "__fish_seen_subcommand_from daily" -s n -l days -d 'Number of days'
 
 # Route options
-complete -c raindrop -n "__fish_seen_subcommand_from route" -s s -l stops -d 'Number of stops'
 complete -c raindrop -n "__fish_seen_subcommand_from route" -s d -l depart -d 'Departure time'
-complete -c raindrop -n "__fish_seen_subcommand_from route" -l speed -d 'Average speed (mph)'
+complete -c raindrop -n "__fish_seen_subcommand_from route" -s i -l interval -d 'Weather check interval in miles'
+complete -c raindrop -n "__fish_seen_subcommand_from route" -l brief -d 'Condensed output'
 """
 
 

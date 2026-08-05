@@ -2,12 +2,28 @@
 
 import hashlib
 import json
+import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-# Default cache directory - use config directory for better compatibility
-CACHE_DIR = Path.home() / ".config" / "raindrop" / "cache"
+
+def _default_cache_dir() -> Path:
+    """Return the platform-friendly cache directory for raindrop."""
+    override = os.environ.get("RAINDROP_CACHE_DIR")
+    if override:
+        return Path(override).expanduser()
+
+    xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
+    if xdg_cache_home:
+        return Path(xdg_cache_home).expanduser() / "raindrop"
+
+    return Path.home() / ".cache" / "raindrop"
+
+
+# Default cache directory - use cache directory for better compatibility
+CACHE_DIR = _default_cache_dir()
 
 # Default TTL (time to live) in seconds
 DEFAULT_TTL = 300  # 5 minutes
@@ -21,10 +37,10 @@ class Cache:
         cache_dir: Path = CACHE_DIR,
         default_ttl: int = DEFAULT_TTL,
         enabled: bool = True,
-    ):
+    ) -> None:
         self.cache_dir = cache_dir
         self.default_ttl = default_ttl
-        self.enabled = enabled
+        self.enabled = enabled and not _no_cache_requested()
 
         if self.enabled:
             try:
@@ -56,7 +72,7 @@ class Cache:
             return None
 
         try:
-            with open(cache_path, "r") as f:
+            with cache_path.open("r") as f:
                 entry = json.load(f)
 
             # Check if expired
@@ -65,7 +81,7 @@ class Cache:
                 return None
 
             return entry.get("data")
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError, AttributeError):
             return None
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> None:
@@ -92,9 +108,11 @@ class Cache:
         }
 
         try:
-            with open(cache_path, "w") as f:
+            tmp_path = cache_path.with_suffix(".json.tmp")
+            with tmp_path.open("w") as f:
                 json.dump(entry, f)
-        except OSError:
+            tmp_path.replace(cache_path)
+        except (TypeError, OSError):
             pass  # Silently fail on write errors
 
     def delete(self, key: str) -> bool:
@@ -122,13 +140,18 @@ class Cache:
                 pass
         return count
 
-    def stats(self) -> dict:
+    def stats(self) -> dict[str, Any]:
         """Get cache statistics."""
         if not self.enabled or not self.cache_dir.exists():
             return {"enabled": self.enabled, "entries": 0, "size_bytes": 0}
 
         entries = list(self.cache_dir.glob("*.json"))
-        total_size = sum(f.stat().st_size for f in entries)
+        total_size = 0
+        for entry in entries:
+            try:
+                total_size += entry.stat().st_size
+            except OSError:
+                pass
 
         # Count valid vs expired
         now = time.time()
@@ -137,13 +160,13 @@ class Cache:
 
         for entry_path in entries:
             try:
-                with open(entry_path, "r") as f:
+                with entry_path.open("r") as f:
                     entry = json.load(f)
                 if entry.get("expires", 0) > now:
                     valid += 1
                 else:
                     expired += 1
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, OSError, AttributeError):
                 expired += 1
 
         return {
@@ -160,6 +183,17 @@ class Cache:
 _cache: Cache | None = None
 
 
+def _no_cache_requested() -> bool:
+    """Return True when caching is disabled for this process."""
+    return os.environ.get("RAINDROP_NO_CACHE", "").lower() in {"1", "true", "yes"}
+
+
+def reset_cache(cache: Cache | None = None) -> None:
+    """Reset the global cache instance, optionally replacing it."""
+    global _cache
+    _cache = cache
+
+
 def get_cache() -> Cache:
     """Get or create the global cache instance."""
     global _cache
@@ -168,7 +202,15 @@ def get_cache() -> Cache:
     return _cache
 
 
-def cached_request(key: str, fetch_func, ttl: int | None = None) -> Any:
+def set_cache_enabled(enabled: bool) -> None:
+    """Enable or disable the process-wide cache."""
+    cache = get_cache()
+    cache.enabled = enabled
+
+
+def cached_request[ValueT](
+    key: str, fetch_func: Callable[[], ValueT], ttl: int | None = None
+) -> ValueT:
     """
     Decorator-style helper for caching API requests.
 

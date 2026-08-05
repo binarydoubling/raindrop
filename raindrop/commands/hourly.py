@@ -1,40 +1,48 @@
 """Hourly forecast command."""
 
-from datetime import datetime
 import json as json_lib
+from datetime import datetime
 
 import click
+from rich import box
 from rich.console import Console
 from rich.table import Table
-from rich import box
 
-from open_meteo import OpenMeteo
-from settings import get_settings, resolve_model
+from raindrop.commands.common import (
+    format_location,
+    geocode,
+    om,
+    resolve_location_or_fail,
+    resolve_model_or_fail,
+)
+from raindrop.settings import get_settings
 from raindrop.utils import (
+    TEMP_SYMBOLS,
     WEATHER_CODES,
     WEATHER_LABELS,
-    TEMP_SYMBOLS,
     WIND_SYMBOLS,
-    sparkline,
+    find_time_index,
     format_delta,
     format_precip_chance,
+    format_time,
+    now_in_timezone,
+    sparkline,
 )
 
-om = OpenMeteo()
 console = Console()
-
-
-def geocode(location: str, country: str | None = None):
-    results = om.geocode(location, country_code=country)
-    return results[0]
 
 
 @click.command()
 @click.argument("location", required=False)
+@click.option("-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)")
 @click.option(
-    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
+    "-n",
+    "--hours",
+    type=click.IntRange(1, 48),
+    default=12,
+    show_default=True,
+    help="Number of hours to show",
 )
-@click.option("-n", "--hours", default=12, help="Number of hours to show (default: 12)")
 @click.option(
     "-m",
     "--model",
@@ -57,26 +65,9 @@ def hourly(
     """
     settings = get_settings()
 
-    # Resolve location (favorites, defaults)
-    try:
-        resolved_location, resolved_country = settings.resolve_location(location)
-    except ValueError:
-        raise click.ClickException(
-            "No location provided. Use 'raindrop hourly <location>' or set a default with 'raindrop config set location <name>'"
-        )
+    location, country = resolve_location_or_fail(settings, location, country, "hourly")
 
-    # CLI country flag overrides resolved country
-    if country is not None:
-        resolved_country = country
-
-    location = resolved_location
-    country = resolved_country
-
-    # Resolve model (CLI flag > settings > auto)
-    try:
-        model_key, models = resolve_model(model_name, settings)
-    except ValueError as e:
-        raise click.ClickException(str(e))
+    model_key, models = resolve_model_or_fail(model_name, settings)
 
     result = geocode(location, country)
 
@@ -103,19 +94,9 @@ def hourly(
     temp_symbol = TEMP_SYMBOLS[settings.temperature_unit]
     wind_symbol = WIND_SYMBOLS[settings.wind_speed_unit]
 
-    # Find current hour index
-    now = datetime.now()
-    current_hour_str = now.strftime("%Y-%m-%dT%H:00")
-
-    try:
-        start_idx = h.time.index(current_hour_str)
-    except ValueError:
-        # If exact match not found, find closest hour
-        start_idx = 0
-        for i, t in enumerate(h.time):
-            if t >= current_hour_str:
-                start_idx = i
-                break
+    # Find current hour index in the target location timezone.
+    now = now_in_timezone(weather.timezone)
+    start_idx = find_time_index(h.time, now)
 
     # Get data arrays (with None safety)
     temps = h.temperature_2m or []
@@ -135,9 +116,7 @@ def hourly(
                     "time": h.time[i],
                     "temperature": temps[i] if i < len(temps) else None,
                     "apparent_temperature": feels[i] if i < len(feels) else None,
-                    "precipitation_probability": precip_probs[i]
-                    if i < len(precip_probs)
-                    else None,
+                    "precipitation_probability": precip_probs[i] if i < len(precip_probs) else None,
                     "weather_code": code,
                     "weather_description": WEATHER_CODES.get(code, "Unknown"),
                     "wind_speed": winds[i] if i < len(winds) else None,
@@ -189,26 +168,20 @@ def hourly(
             else "\u2014"
         )
         wind_range = (
-            f"{min(wind_clean):.0f}-{max(wind_clean):.0f} {wind_symbol}"
-            if wind_clean
-            else "\u2014"
+            f"{min(wind_clean):.0f}-{max(wind_clean):.0f} {wind_symbol}" if wind_clean else "\u2014"
         )
         precip_max = (
-            f"{max(precip_clean):.0f}%"
-            if precip_clean and max(precip_clean) > 0
-            else "\u2014"
+            f"{max(precip_clean):.0f}%" if precip_clean and max(precip_clean) > 0 else "\u2014"
         )
 
-        console.print(
-            f"\n[bold cyan]{result.name}[/bold cyan] [dim]Next {hours}h[/dim]\n"
-        )
+        console.print(f"\n[bold cyan]{result.name}[/bold cyan] [dim]Next {hours}h[/dim]\n")
         console.print(f"[dim]Temp[/dim]   {sparkline(temp_vals)}  {temp_range}")
         console.print(f"[dim]Precip[/dim] {sparkline(precip_vals)}  {precip_max}")
         console.print(f"[dim]Wind[/dim]   {sparkline(wind_vals)}  {wind_range}")
         return
 
     # Location header
-    console.print(f"\n[bold cyan]{result.name}, {result.admin1}[/bold cyan]")
+    console.print(f"\n[bold cyan]{format_location(result, include_country=False)}[/bold cyan]")
     console.print(f"[dim]Next {hours} hours[/dim]\n")
 
     # Build the table
@@ -230,9 +203,9 @@ def hourly(
             if hour_dt.hour == now.hour:
                 time_display = "[bold yellow]Now[/bold yellow]"
             else:
-                time_display = hour_dt.strftime("%-I%p").lower()
+                time_display = format_time(hour_dt, "{hour}%p")
         else:
-            time_display = hour_dt.strftime("%a %-I%p").lower()
+            time_display = f"{hour_dt.strftime('%a')} {format_time(hour_dt, '{hour}%p')}"
 
         # Get values for this hour
         temp = temps[i] if i < len(temps) else 0
@@ -246,9 +219,7 @@ def hourly(
         prev_idx = i - 1 if i > start_idx else i
         prev_temp = temps[prev_idx] if prev_idx < len(temps) else temp
         prev_feel = feels[prev_idx] if prev_idx < len(feels) else feel
-        prev_precip_prob = (
-            precip_probs[prev_idx] if prev_idx < len(precip_probs) else precip_prob
-        )
+        prev_precip_prob = precip_probs[prev_idx] if prev_idx < len(precip_probs) else precip_prob
         prev_wind = winds[prev_idx] if prev_idx < len(winds) else wind
         prev_humidity = humidities[prev_idx] if prev_idx < len(humidities) else humidity
 

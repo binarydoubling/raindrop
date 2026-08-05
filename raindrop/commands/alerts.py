@@ -5,29 +5,20 @@ import json as json_lib
 import click
 from rich.console import Console
 
-from open_meteo import OpenMeteo, NWSClient
-from settings import get_settings
+from raindrop.commands.common import format_location, geocode, nws, resolve_location_or_fail
+from raindrop.settings import get_settings
 from raindrop.utils import (
     SEVERITY_COLORS,
     URGENCY_COLORS,
     format_alert_time,
 )
 
-om = OpenMeteo()
-nws = NWSClient()
 console = Console()
-
-
-def geocode(location: str, country: str | None = None):
-    results = om.geocode(location, country_code=country)
-    return results[0]
 
 
 @click.command()
 @click.argument("location", required=False)
-@click.option(
-    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
-)
+@click.option("-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.option("-v", "--verbose", is_flag=True, help="Show full alert details")
 def alerts(location: str | None, country: str | None, as_json: bool, verbose: bool):
@@ -40,20 +31,7 @@ def alerts(location: str | None, country: str | None, as_json: bool, verbose: bo
     """
     settings = get_settings()
 
-    # Resolve location (favorites, defaults)
-    try:
-        resolved_location, resolved_country = settings.resolve_location(location)
-    except ValueError:
-        raise click.ClickException(
-            "No location provided. Use 'raindrop alerts <location>' or set a default with 'raindrop config set location <name>'"
-        )
-
-    # CLI country flag overrides resolved country
-    if country is not None:
-        resolved_country = country
-
-    location = resolved_location
-    country = resolved_country
+    location, country = resolve_location_or_fail(settings, location, country, "alerts")
 
     result = geocode(location, country)
 
@@ -103,9 +81,7 @@ def alerts(location: str | None, country: str | None, as_json: bool, verbose: bo
         return
 
     # Header
-    console.print(
-        f"\n[bold cyan]{result.name}, {result.admin1}, {result.country}[/bold cyan]"
-    )
+    console.print(f"\n[bold cyan]{format_location(result)}[/bold cyan]")
 
     if not alert_list:
         console.print("[green]No active weather alerts[/green]\n")
@@ -140,9 +116,7 @@ def alerts(location: str | None, country: str | None, as_json: bool, verbose: bo
         # Timing
         onset_str = format_alert_time(alert.onset)
         expires_str = format_alert_time(alert.expires)
-        console.print(
-            f"  [dim]From:[/dim] {onset_str}  [dim]Until:[/dim] {expires_str}"
-        )
+        console.print(f"  [dim]From:[/dim] {onset_str}  [dim]Until:[/dim] {expires_str}")
 
         # Headline
         if alert.headline:

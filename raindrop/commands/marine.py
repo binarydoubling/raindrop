@@ -1,24 +1,23 @@
 """Marine weather forecast command."""
 
-from datetime import datetime
 import json as json_lib
+from datetime import datetime
 
 import click
+from rich import box
 from rich.console import Console
 from rich.table import Table
-from rich.panel import Panel
-from rich import box
 
-from open_meteo import OpenMeteo
-from settings import get_settings
+from raindrop.cache import cached_request
+from raindrop.commands.common import format_location, geocode, resolve_location_or_fail
+from raindrop.settings import get_settings
 from raindrop.utils import (
-    WEATHER_CODES,
-    WEATHER_LABELS,
-    sparkline,
     deg_to_compass,
+    find_time_index,
+    now_in_timezone,
+    sparkline,
 )
 
-om = OpenMeteo()
 console = Console()
 
 
@@ -26,16 +25,12 @@ console = Console()
 MARINE_BASE_URL = "https://marine-api.open-meteo.com/v1"
 
 
-def geocode(location: str, country: str | None = None):
-    results = om.geocode(location, country_code=country)
-    return results[0]
-
-
 def get_marine_forecast(lat: float, lon: float, settings) -> dict:
     """Fetch marine weather forecast from Open-Meteo Marine API."""
-    import urllib.request
-    import urllib.parse
     import json
+    import urllib.error
+    import urllib.parse
+    import urllib.request
 
     params = {
         "latitude": lat,
@@ -68,11 +63,16 @@ def get_marine_forecast(lat: float, lon: float, settings) -> dict:
     query = urllib.parse.urlencode(params)
     url = f"{MARINE_BASE_URL}/marine?{query}"
 
-    try:
-        with urllib.request.urlopen(url, timeout=10) as response:
-            return json.loads(response.read().decode())
-    except Exception as e:
-        raise click.ClickException(f"Could not fetch marine forecast: {e}")
+    def fetch() -> dict:
+        try:
+            with urllib.request.urlopen(url, timeout=10) as response:
+                return json.loads(response.read().decode())
+        except urllib.error.HTTPError as e:
+            raise click.ClickException(f"Could not fetch marine forecast: HTTP {e.code}") from e
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+            raise click.ClickException(f"Could not fetch marine forecast: {e}") from e
+
+    return cached_request(f"marine:{url}", fetch, ttl=600)
 
 
 def wave_height_color(height: float) -> str:
@@ -111,10 +111,15 @@ def wave_conditions(height: float) -> str:
 
 @click.command()
 @click.argument("location", required=False)
+@click.option("-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)")
 @click.option(
-    "-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)"
+    "-n",
+    "--days",
+    type=click.IntRange(1, 7),
+    default=5,
+    show_default=True,
+    help="Number of days to show",
 )
-@click.option("-n", "--days", default=5, help="Number of days to show (default: 5)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 def marine(location: str | None, country: str | None, days: int, as_json: bool):
     """Show marine/ocean weather forecast.
@@ -128,20 +133,7 @@ def marine(location: str | None, country: str | None, days: int, as_json: bool):
     """
     settings = get_settings()
 
-    # Resolve location (favorites, defaults)
-    try:
-        resolved_location, resolved_country = settings.resolve_location(location)
-    except ValueError:
-        raise click.ClickException(
-            "No location provided. Use 'raindrop marine <location>' or set a default with 'raindrop config set location <name>'"
-        )
-
-    # CLI country flag overrides resolved country
-    if country is not None:
-        resolved_country = country
-
-    location = resolved_location
-    country = resolved_country
+    location, country = resolve_location_or_fail(settings, location, country, "marine")
 
     result = geocode(location, country)
 
@@ -174,20 +166,12 @@ def marine(location: str | None, country: str | None, days: int, as_json: bool):
         return
 
     # Display header
-    console.print(
-        f"\n[bold cyan]{result.name}, {result.admin1}, {result.country}[/bold cyan]"
-    )
+    console.print(f"\n[bold cyan]{format_location(result)}[/bold cyan]")
     console.print("[dim]Marine Weather Forecast[/dim]\n")
 
     # Current conditions (first available hour)
     if hourly.get("wave_height"):
-        now = datetime.now()
-        current_hour = now.strftime("%Y-%m-%dT%H:00")
-
-        try:
-            idx = hourly["time"].index(current_hour)
-        except ValueError:
-            idx = 0
+        idx = find_time_index(hourly["time"], now_in_timezone(data.get("timezone")))
 
         wave_h = (
             hourly["wave_height"][idx]
@@ -206,8 +190,7 @@ def marine(location: str | None, country: str | None, days: int, as_json: bool):
         )
         swell_h = (
             hourly["swell_wave_height"][idx]
-            if hourly.get("swell_wave_height")
-            and idx < len(hourly["swell_wave_height"])
+            if hourly.get("swell_wave_height") and idx < len(hourly["swell_wave_height"])
             else None
         )
 
@@ -262,7 +245,7 @@ def marine(location: str | None, country: str | None, days: int, as_json: bool):
         table.add_column("Direction")
         table.add_column("Swell", justify="right")
 
-        today = datetime.now().date()
+        today = now_in_timezone(data.get("timezone")).date()
 
         for i in range(min(days, len(daily["time"]))):
             date = datetime.fromisoformat(daily["time"][i]).date()

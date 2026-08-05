@@ -33,6 +33,7 @@ Issues = "https://github.com/binarydoubling/raindrop/issues"
 
 [project.scripts]
 raindrop = "raindrop.cli:main"
+rdrop = "raindrop.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -41,15 +42,25 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["raindrop"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"open_meteo.py" = "open_meteo.py"
-"settings.py" = "settings.py"
-
-[tool.hatch.build.targets.sdist.force-include]
-"open_meteo.py" = "open_meteo.py"
-"settings.py" = "settings.py"
-
 [dependency-groups]
 dev = [
     "pyright>=1.1.408",
+    "pytest>=9.0.2",
+    "ruff>=0.14.8",
 ]
+
+[tool.pyright]
+include = ["raindrop", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B904", "E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["raindrop"]
