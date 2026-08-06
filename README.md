@@ -6,12 +6,12 @@
 
 <p align="center">
   <strong>A beautiful, feature-rich weather CLI for your terminal.</strong><br>
-  Sparklines, route planning, live dashboards, marine forecasts, and more — all without an API key.
+  Sparklines, route planning, live dashboards, marine forecasts, measured stations, and more — core forecasts need no API key.
 </p>
 
 <p align="center">
   <a href="#installation"><img src="https://img.shields.io/badge/python-3.12+-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python 3.12+"></a>
-  <a href="#commands"><img src="https://img.shields.io/badge/commands-18-22c55e?style=flat-square" alt="18 Commands"></a>
+  <a href="#commands"><img src="https://img.shields.io/badge/commands-19-22c55e?style=flat-square" alt="19 Commands"></a>
   <a href="https://open-meteo.com/"><img src="https://img.shields.io/badge/API-Open--Meteo-f97316?style=flat-square" alt="Open-Meteo"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-MIT-a855f7?style=flat-square" alt="MIT License"></a>
   <a href="#"><img src="https://img.shields.io/badge/dependencies-2-64748b?style=flat-square" alt="2 Dependencies"></a>
@@ -35,7 +35,8 @@ Most weather CLIs give you temperature and a condition. Raindrop gives you **eve
 - **Full-screen dashboard** — live TUI with auto-refresh
 - **Astronomical data** — moon phases, golden hour, blue hour, daylight tracking
 - **Marine forecasts** — wave height, swell, water temp for coastal trips
-- **Zero API keys** — entirely free, open APIs
+- **Zero-key core weather** — forecasts, dashboards, routes, air quality, alerts, and astronomy use free/open APIs
+- **Optional measured stations** — nearby personal/official observations via Xweather when you configure a key
 
 ---
 
@@ -60,6 +61,7 @@ pip install -e .
 ```bash
 raindrop current Seattle                          # current conditions
 raindrop window Seattle                           # sensory weather scene
+raindrop stations nearby Fairbanks                 # nearby PWS observations (optional Xweather key)
 raindrop hourly "New York" --spark --hours 12     # sparkline forecast
 raindrop daily Portland                           # 10-day with trend analysis
 raindrop dashboard Seattle --refresh 300          # live full-screen TUI
@@ -85,6 +87,18 @@ raindrop outside Tokyo --compact
 ### Current Weather
 
 <img src="assets/current.svg" alt="raindrop current Seattle" width="700">
+
+### Measured Station Observations
+
+Nearby personal weather station and official station observations through Xweather. These are measured station readings with station IDs, source classification, timestamps, QC/trust status, and freshness — separate from `raindrop current`, which remains Open-Meteo model/gridded current conditions.
+
+```bash
+raindrop stations nearby Fairbanks
+raindrop stations nearby Fairbanks --kind pws
+raindrop stations current PWS_SM9110
+```
+
+Xweather is optional and requires credentials. Human output includes the required attribution: Powered by Vaisala Xweather.
 
 ### Hourly Forecast with Sparklines
 
@@ -140,6 +154,7 @@ raindrop dashboard Seattle --refresh 300
 |---------|-------------|---------|
 | `window` / `outside` | First-person weather scene | `raindrop window Seattle` |
 | `current` | Current conditions | `raindrop current Seattle` |
+| `stations` | Measured station observations | `raindrop stations nearby Fairbanks` |
 | `hourly` | Hourly forecast (48h) | `raindrop hourly Seattle --spark` |
 | `daily` | 10-day forecast with trends | `raindrop daily Seattle` |
 | `dashboard` | Full-screen live TUI | `raindrop dashboard Seattle` |
@@ -174,6 +189,14 @@ Use `raindrop config set units metric|imperial` to switch unit presets.
 
 Settings live at `$RAINDROP_CONFIG_DIR/config.json`, `$XDG_CONFIG_HOME/raindrop/config.json`, or `~/.config/raindrop/config.json`.
 API responses are cached under `$RAINDROP_CACHE_DIR`, `$XDG_CACHE_HOME/raindrop`, or `~/.cache/raindrop`.
+
+Optional Xweather credentials for `raindrop stations` can be supplied with `XWEATHER_API_KEY` or a mode-0600 JSON file at the same config directory, e.g. `~/.config/raindrop/xweather.json`:
+
+```json
+{"api_key":"<your combined Xweather API key>"}
+```
+
+Existing forecast/current commands remain keyless. `raindrop config show` only reports Xweather as configured/not configured and never prints the key.
 
 ```bash
 raindrop config show                  # view current settings
@@ -212,19 +235,21 @@ raindrop completions fish > ~/.config/fish/completions/raindrop.fish
 
 ## How It Works
 
-Raindrop combines several free, open APIs — no keys required:
+Raindrop combines several free/open APIs for core weather, with optional credentialed providers for measured observations:
 
 | API | Purpose |
 |-----|---------|
 | [Open-Meteo](https://open-meteo.com/) | Forecasts, historical data, air quality, geocoding |
 | [OSRM](http://project-osrm.org/) | Real driving routes via OpenStreetMap |
 | [NWS](https://www.weather.gov/documentation/services-web-api) | Weather alerts and forecast discussions (US) |
+| [Xweather](https://www.xweather.com/) | Optional measured personal/official station observations |
 
-The entire project has only **2 runtime dependencies** (Click and Rich). HTTP, caching, geocoding, and astronomical calculations are all handled with Python's standard library.
+The entire project has only **2 runtime dependencies** (Click and Rich). HTTP, caching, geocoding, credentials, and astronomical calculations are all handled with Python's standard library.
 
 ### Technical Highlights
 
 - **Weather window scene engine** that infers air texture, sky, light, motion, surface, and horizon from combined variables
+- **Measured station observations** with provider/source identity, timestamps, QC/trust labels, freshness filtering, and safe credential-free cache keys
 - **Sparklines** via Unicode block characters (`▁▂▃▄▅▆▇█`)
 - **EMA crossovers** and rate-of-change analysis on temperature data
 - **Pure-Python astronomy** — moon phases, Julian day, daylight duration with no external libs

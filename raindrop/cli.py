@@ -24,6 +24,7 @@ from raindrop.commands import (
     marine,
     precip,
     route,
+    stations,
     window,
 )
 from raindrop.open_meteo import OpenMeteoError
@@ -55,6 +56,7 @@ cli.add_command(fav, "favorites")
 cli.add_command(astro)
 cli.add_command(clothing)
 cli.add_command(route)
+cli.add_command(stations)
 cli.add_command(completions)
 cli.add_command(dashboard)
 cli.add_command(marine)

@@ -8,6 +8,7 @@ from rich.table import Table
 
 from raindrop.cache import get_cache
 from raindrop.open_meteo import PrecipitationUnit, TemperatureUnit, WindSpeedUnit
+from raindrop.providers.xweather import get_xweather_credential_status
 from raindrop.settings import (
     AVAILABLE_MODELS,
     PRECIPITATION_UNITS,
@@ -41,6 +42,11 @@ def config_show():
     table.add_row("wind_speed_unit", settings.wind_speed_unit)
     table.add_row("precipitation_unit", settings.precipitation_unit)
     table.add_row("model", settings.model or "(auto)")
+    xweather = get_xweather_credential_status()
+    if xweather.configured:
+        table.add_row("xweather", f"configured ({xweather.source})")
+    else:
+        table.add_row("xweather", "not configured")
 
     console.print(table)
 

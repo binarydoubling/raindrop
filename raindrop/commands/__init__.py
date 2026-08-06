@@ -17,6 +17,7 @@ from .hourly import hourly
 from .marine import marine
 from .precip import precip
 from .route import route
+from .stations import stations
 from .window import window
 
 __all__ = [
@@ -34,6 +35,7 @@ __all__ = [
     "astro",
     "clothing",
     "route",
+    "stations",
     "completions",
     "dashboard",
     "marine",

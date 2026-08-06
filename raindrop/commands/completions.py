@@ -55,6 +55,7 @@ _raindrop() {
         'outside:Peer through a weather window into a location'
         'precip:Show precipitation forecast'
         'route:Show weather conditions along a route'
+        'stations:Show measured station observations'
         'window:Peer through a weather window into a location'
     )
     
@@ -72,6 +73,12 @@ _raindrop() {
         'list:List all saved favorites'
         'add:Add a favorite location'
         'remove:Remove a favorite location'
+    )
+
+    local -a station_subcommands
+    station_subcommands=(
+        'nearby:List nearby measured observations'
+        'current:Show one station observation'
     )
     
     _arguments -C \\
@@ -91,6 +98,9 @@ _raindrop() {
                     ;;
                 fav|favorites)
                     _describe -t subcommands 'fav subcommands' fav_subcommands
+                    ;;
+                stations)
+                    _describe -t subcommands 'station subcommands' station_subcommands
                     ;;
                 current|hourly|daily|aqi|alerts|astro|clothing|discussion|history|marine|outside|precip|window)
                     _arguments \\
@@ -152,6 +162,7 @@ complete -c raindrop -n __fish_use_subcommand -a marine -d 'Marine forecast'
 complete -c raindrop -n __fish_use_subcommand -a outside -d 'Weather window'
 complete -c raindrop -n __fish_use_subcommand -a precip -d 'Precipitation forecast'
 complete -c raindrop -n __fish_use_subcommand -a route -d 'Route weather'
+complete -c raindrop -n __fish_use_subcommand -a stations -d 'Measured station observations'
 complete -c raindrop -n __fish_use_subcommand -a window -d 'Weather window'
 
 # Config subcommands
@@ -165,6 +176,10 @@ complete -c raindrop -n "__fish_seen_subcommand_from config" -a cache -d 'View c
 complete -c raindrop -n "__fish_seen_subcommand_from fav favorites" -a list -d 'List favorites'
 complete -c raindrop -n "__fish_seen_subcommand_from fav favorites" -a add -d 'Add favorite'
 complete -c raindrop -n "__fish_seen_subcommand_from fav favorites" -a remove -d 'Remove favorite'
+
+# Stations subcommands
+complete -c raindrop -n "__fish_seen_subcommand_from stations" -a nearby -d 'Nearby station observations'
+complete -c raindrop -n "__fish_seen_subcommand_from stations" -a current -d 'Current station observation'
 
 # Common options
 complete -c raindrop -s c -l country -d 'Country code (e.g., US)'
