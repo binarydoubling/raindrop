@@ -10,10 +10,10 @@ from rich.table import Table
 
 from raindrop.commands.common import (
     format_location,
+    format_weather_source,
     geocode,
-    om,
     resolve_location_or_fail,
-    resolve_model_or_fail,
+    resolve_weather_provider_or_fail,
 )
 from raindrop.settings import get_settings
 from raindrop.utils import find_time_index, now_in_timezone, sparkline
@@ -36,7 +36,7 @@ console = Console()
     "-m",
     "--model",
     "model_name",
-    help="Weather model to use (see 'raindrop config models')",
+    help="Open-Meteo model to use (forces Open-Meteo in auto mode)",
 )
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 def precip(
@@ -54,11 +54,11 @@ def precip(
 
     location, country = resolve_location_or_fail(settings, location, country, "precip")
 
-    model_key, models = resolve_model_or_fail(model_name, settings)
+    weather_provider = resolve_weather_provider_or_fail(model_name, settings)
 
     result = geocode(location, country)
 
-    weather = om.forecast(
+    weather = weather_provider.forecast(
         result.latitude,
         result.longitude,
         daily=[
@@ -75,7 +75,6 @@ def precip(
             "precipitation_probability",
         ],
         precipitation_unit=settings.precipitation_unit,
-        models=models,
         forecast_days=min(days, 16),
     )
 
@@ -123,7 +122,12 @@ def precip(
                 "latitude": result.latitude,
                 "longitude": result.longitude,
             },
-            "model": model_key or "auto",
+            "model": weather_provider.model_label,
+            "source": {
+                "provider": weather_provider.name,
+                "label": weather_provider.label,
+                "attribution": weather_provider.attribution,
+            },
             "totals": {
                 "precipitation": total_precip,
                 "rain": total_rain,
@@ -140,7 +144,9 @@ def precip(
 
     # Header
     console.print(f"\n[bold cyan]{format_location(result)}[/bold cyan]")
-    console.print(f"[dim]{days}-day precipitation forecast[/dim]\n")
+    console.print(
+        f"[dim]{days}-day precipitation forecast · {format_weather_source(weather_provider)}[/dim]\n"
+    )
 
     # Summary
     if total_precip > 0:

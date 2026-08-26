@@ -15,8 +15,8 @@ from rich.text import Text
 from raindrop.commands.common import (
     format_location,
     geocode,
-    om,
     resolve_location_or_fail,
+    resolve_weather_provider_or_fail,
 )
 from raindrop.settings import get_settings
 from raindrop.utils import (
@@ -264,10 +264,11 @@ def render_astro(weather) -> Panel:
     return Panel(table, title="[bold]Sun & Moon[/bold]", border_style="magenta")
 
 
-def render_footer(refresh: int) -> Panel:
+def render_footer(refresh: int, attribution: str | None = None) -> Panel:
     """Render the footer panel."""
+    source = f"  |  {attribution}" if attribution else ""
     return Panel(
-        f"[dim]Press [bold]Ctrl+C[/bold] to exit  |  Refreshes every {refresh} seconds  |  Raindrop Weather Dashboard[/dim]",
+        f"[dim]Press [bold]Ctrl+C[/bold] to exit  |  Refreshes every {refresh} seconds  |  Raindrop Weather Dashboard{source}[/dim]",
         box=box.ROUNDED,
         style="dim",
     )
@@ -284,7 +285,8 @@ def render_error_footer(message: str, refresh: int) -> Panel:
 
 def fetch_weather_data(geo, settings):
     """Fetch all weather data needed for dashboard."""
-    return om.forecast(
+    weather_provider = resolve_weather_provider_or_fail(None, settings)
+    return weather_provider.forecast(
         geo.latitude,
         geo.longitude,
         current=[
@@ -367,7 +369,7 @@ def dashboard(location: str | None, country: str | None, refresh: int):
         layout["hourly"].update(render_hourly(weather, settings))
         layout["daily"].update(render_daily(weather, settings))
         layout["astro"].update(render_astro(weather))
-        layout["footer"].update(render_footer(refresh))
+        layout["footer"].update(render_footer(refresh, weather.attribution))
 
     # Initial update
     update_dashboard()

@@ -28,6 +28,7 @@ from raindrop.commands import (
     window,
 )
 from raindrop.open_meteo import OpenMeteoError
+from raindrop.providers.xweather import XweatherError
 
 
 @click.group()
@@ -76,7 +77,7 @@ def main() -> None:
     except click.Abort as e:
         click.echo("Aborted!", err=True)
         raise SystemExit(1) from e
-    except OpenMeteoError as e:
+    except (OpenMeteoError, XweatherError) as e:
         click.ClickException(str(e)).show()
         raise SystemExit(1) from e
 

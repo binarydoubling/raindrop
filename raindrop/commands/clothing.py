@@ -5,7 +5,13 @@ import json as json_lib
 import click
 from rich.console import Console
 
-from raindrop.commands.common import format_location, geocode, om, resolve_location_or_fail
+from raindrop.commands.common import (
+    format_location,
+    format_weather_source,
+    geocode,
+    resolve_location_or_fail,
+    resolve_weather_provider_or_fail,
+)
 from raindrop.settings import get_settings
 from raindrop.utils import (
     TEMP_SYMBOLS,
@@ -202,9 +208,11 @@ def clothing(location: str | None, country: str | None, as_json: bool):
 
     location, country = resolve_location_or_fail(settings, location, country, "clothing")
 
+    weather_provider = resolve_weather_provider_or_fail(None, settings)
+
     result = geocode(location, country)
 
-    weather = om.forecast(
+    weather = weather_provider.forecast(
         result.latitude,
         result.longitude,
         current=[
@@ -246,6 +254,11 @@ def clothing(location: str | None, country: str | None, as_json: bool):
                 "admin1": result.admin1,
                 "country": result.country,
             },
+            "source": {
+                "provider": weather_provider.name,
+                "label": weather_provider.label,
+                "attribution": weather_provider.attribution,
+            },
             "conditions": {
                 "temperature": c.temperature_2m,
                 "feels_like": c.apparent_temperature,
@@ -263,8 +276,9 @@ def clothing(location: str | None, country: str | None, as_json: bool):
     # Display
     console.print(f"\n[bold cyan]{format_location(result, include_country=False)}[/bold cyan]")
     console.print(
-        f"[dim]{c.temperature_2m:.0f}\u00b0{temp_symbol} (feels like {c.apparent_temperature:.0f}\u00b0{temp_symbol}) \u00b7 {weather_desc}[/dim]\n"
+        f"[dim]{c.temperature_2m:.0f}\u00b0{temp_symbol} (feels like {c.apparent_temperature:.0f}\u00b0{temp_symbol}) \u00b7 {weather_desc}[/dim]"
     )
+    console.print(f"[dim]{format_weather_source(weather_provider)}[/dim]\n")
 
     # Clothing panel
     console.print("[bold]What to Wear[/bold]\n")

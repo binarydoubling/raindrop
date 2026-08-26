@@ -340,7 +340,7 @@ def test_stations_nearby_json_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     runner = CliRunner()
 
-    result = runner.invoke(cli, ["stations", "nearby", "Fairbanks", "--json"])
+    result = runner.invoke(cli, ["stations", "nearby", "Fairbanks", "--json", "--include-stale"])
 
     assert result.exit_code == 0
     data = json.loads(result.output)

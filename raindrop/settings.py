@@ -6,13 +6,15 @@ import json
 import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from raindrop.open_meteo import PrecipitationUnit, TemperatureUnit, WindSpeedUnit
 
 TEMPERATURE_UNITS = ("celsius", "fahrenheit")
 WIND_SPEED_UNITS = ("kmh", "ms", "mph", "kn")
 PRECIPITATION_UNITS = ("mm", "inch")
+WEATHER_PROVIDERS = ("auto", "open-meteo", "xweather")
+WeatherProviderName = Literal["auto", "open-meteo", "xweather"]
 
 
 def _default_config_dir() -> Path:
@@ -92,7 +94,8 @@ class Settings:
     wind_speed_unit: WindSpeedUnit = "mph"
     precipitation_unit: PrecipitationUnit = "mm"
 
-    # Weather model
+    # Weather provider and model
+    weather_provider: WeatherProviderName = "auto"
     model: str | None = None  # None = let Open-Meteo auto-select
 
     # Favorites (alias -> Favorite)
@@ -126,6 +129,8 @@ class Settings:
             if not isinstance(model, str) or model not in AVAILABLE_MODELS:
                 model = None
 
+            weather_provider = _load_weather_provider(raw_data.get("weather_provider"))
+
             location = raw_data.get("location")
             if not isinstance(location, str):
                 location = None
@@ -145,6 +150,7 @@ class Settings:
                 temperature_unit=temperature_unit,
                 wind_speed_unit=wind_speed_unit,
                 precipitation_unit=precipitation_unit,
+                weather_provider=weather_provider,
                 model=model,
                 favorites=favorites,
             )
@@ -192,6 +198,13 @@ def _load_favorites(value: object) -> dict[str, Favorite]:
             country_code = None
         favorites[alias] = Favorite(name=name, country_code=country_code)
     return favorites
+
+
+def _load_weather_provider(value: object) -> WeatherProviderName:
+    """Parse a weather provider from config data."""
+    if value in WEATHER_PROVIDERS:
+        return cast(WeatherProviderName, value)
+    return "auto"
 
 
 def _load_temperature_unit(value: object) -> TemperatureUnit:

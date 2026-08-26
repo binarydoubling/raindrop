@@ -11,11 +11,11 @@ from rich.table import Table
 
 from raindrop.commands.common import (
     format_location,
+    format_weather_source,
     geocode,
     location_payload,
-    om,
     resolve_location_or_fail,
-    resolve_model_or_fail,
+    resolve_weather_provider_or_fail,
 )
 from raindrop.scene import SceneReading, build_scene_report
 from raindrop.settings import get_settings
@@ -38,7 +38,7 @@ def _at_index[T](values: list[T] | None, index: int) -> T | None:
     "-m",
     "--model",
     "model_name",
-    help="Weather model to use (see 'raindrop config models')",
+    help="Open-Meteo model to use (forces Open-Meteo in auto mode)",
 )
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.option("--compact", is_flag=True, help="Only show the scene summary")
@@ -59,10 +59,10 @@ def window(
     """
     settings = get_settings()
     location, country = resolve_location_or_fail(settings, location, country, "window")
-    model_key, models = resolve_model_or_fail(model_name, settings)
+    weather_provider = resolve_weather_provider_or_fail(model_name, settings)
 
     result = geocode(location, country)
-    weather = om.forecast(
+    weather = weather_provider.forecast(
         result.latitude,
         result.longitude,
         current=[
@@ -93,7 +93,6 @@ def window(
         temperature_unit=settings.temperature_unit,
         wind_speed_unit=settings.wind_speed_unit,
         precipitation_unit=settings.precipitation_unit,
-        models=models,
         forecast_days=1,
     )
 
@@ -139,7 +138,12 @@ def window(
         data = {
             "location": location_payload(result),
             "timezone": weather.timezone,
-            "model": model_key or "auto",
+            "model": weather_provider.model_label,
+            "source": {
+                "provider": weather_provider.name,
+                "label": weather_provider.label,
+                "attribution": weather_provider.attribution,
+            },
             "weather_description": WEATHER_CODES.get(c.weather_code or 0, "Unknown"),
             "reading": asdict(reading),
             "scene": report.to_dict(),
@@ -153,7 +157,7 @@ def window(
 
     console.print(f"\n[bold cyan]{format_location(result)}[/bold cyan]")
     console.print(
-        f"[dim]Weather window · {weather.timezone} · Model: {model_key or 'auto'}[/dim]\n"
+        f"[dim]Weather window · {weather.timezone} · {format_weather_source(weather_provider)}[/dim]\n"
     )
 
     console.print(

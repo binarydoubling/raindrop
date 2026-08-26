@@ -12,8 +12,8 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from raindrop.commands.common import geocode, om
-from raindrop.settings import get_settings
+from raindrop.commands.common import geocode, resolve_weather_provider_or_fail
+from raindrop.settings import Settings, get_settings
 from raindrop.utils import (
     TEMP_SYMBOLS,
     WEATHER_LABELS,
@@ -23,6 +23,7 @@ from raindrop.utils import (
     now_in_timezone,
     sparkline,
 )
+from raindrop.weather_provider import WeatherProviderSelection
 
 console = Console()
 progress_console = Console(stderr=True)
@@ -340,13 +341,14 @@ def get_weather_for_point(
     lat: float,
     lon: float,
     arrival_time: datetime,
-    settings,
+    settings: Settings,
+    weather_provider: WeatherProviderSelection,
 ) -> dict:
     """Get weather forecast for a specific point at estimated arrival time."""
     if lat is None or lon is None:
         return {}
 
-    weather = om.forecast(
+    weather = weather_provider.forecast(
         lat,
         lon,
         hourly=[
@@ -436,6 +438,7 @@ def route(
     settings = get_settings()
     temp_symbol = TEMP_SYMBOLS[settings.temperature_unit]
     wind_symbol = WIND_SYMBOLS[settings.wind_speed_unit]
+    weather_provider = resolve_weather_provider_or_fail(None, settings)
 
     # Geocode origin and destination
     progress_console.print("[dim]Finding locations...[/dim]")
@@ -485,7 +488,9 @@ def route(
     for cp in checkpoints:
         arrival_time = departure_time + timedelta(seconds=cp["cumulative_duration_s"])
         cp["arrival_time"] = arrival_time
-        cp["weather"] = get_weather_for_point(cp["lat"], cp["lon"], arrival_time, settings)
+        cp["weather"] = get_weather_for_point(
+            cp["lat"], cp["lon"], arrival_time, settings, weather_provider
+        )
 
     # JSON output
     if as_json:
@@ -501,6 +506,11 @@ def route(
                 "admin1": dest_geo.admin1,
                 "latitude": dest_geo.latitude,
                 "longitude": dest_geo.longitude,
+            },
+            "source": {
+                "provider": weather_provider.name,
+                "label": weather_provider.label,
+                "attribution": weather_provider.attribution,
             },
             "route": {
                 "total_distance_mi": total_distance_mi,
@@ -543,9 +553,12 @@ def route(
     arrival = departure_time + total_duration
 
     console.print(f"\n[bold cyan]Route: {origin_geo.name} \u2192 {dest_geo.name}[/bold cyan]")
+    source_text = f" · Source: {weather_provider.model_label}"
+    if weather_provider.attribution:
+        source_text += f" · {weather_provider.attribution}"
     console.print(
         f"[dim]{total_distance_mi:.0f} miles · {format_duration(total_duration_s)} · "
-        f"Depart {format_time(departure_time)} → Arrive {format_time(arrival)}[/dim]\n"
+        f"Depart {format_time(departure_time)} → Arrive {format_time(arrival)}{source_text}[/dim]\n"
     )
 
     # Turn-by-turn directions (unless --brief)

@@ -10,10 +10,10 @@ from rich.table import Table
 
 from raindrop.commands.common import (
     format_location,
+    format_weather_source,
     geocode,
-    om,
     resolve_location_or_fail,
-    resolve_model_or_fail,
+    resolve_weather_provider_or_fail,
 )
 from raindrop.settings import get_settings
 from raindrop.utils import (
@@ -37,7 +37,7 @@ console = Console()
     "-m",
     "--model",
     "model_name",
-    help="Weather model to use (see 'raindrop config models')",
+    help="Open-Meteo model to use (forces Open-Meteo in auto mode)",
 )
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.option("--compact", is_flag=True, help="One-line output for shell prompts")
@@ -56,11 +56,11 @@ def current(
 
     location, country = resolve_location_or_fail(settings, location, country, "current")
 
-    model_key, models = resolve_model_or_fail(model_name, settings)
+    weather_provider = resolve_weather_provider_or_fail(model_name, settings)
 
     result = geocode(location, country)
 
-    weather = om.forecast(
+    weather = weather_provider.forecast(
         result.latitude,
         result.longitude,
         current=[
@@ -86,7 +86,6 @@ def current(
         ],
         temperature_unit=settings.temperature_unit,
         wind_speed_unit=settings.wind_speed_unit,
-        models=models,
         forecast_days=1,
     )
     c = weather.current
@@ -109,7 +108,12 @@ def current(
             },
             "elevation": weather.elevation,
             "timezone": weather.timezone,
-            "model": model_key or "auto",
+            "model": weather_provider.model_label,
+            "source": {
+                "provider": weather_provider.name,
+                "label": weather_provider.label,
+                "attribution": weather_provider.attribution,
+            },
             "current": {
                 "time": c.time,
                 "temperature": c.temperature_2m,
@@ -176,8 +180,7 @@ def current(
     console.print(f"[dim]WMO {code}: {condition} ({is_day_str})[/dim]")
 
     # Model info
-    model_display = model_key or "auto"
-    console.print(f"[dim]Model: {model_display}[/dim]\n")
+    console.print(f"[dim]{format_weather_source(weather_provider)}[/dim]\n")
 
     # Main conditions table
     table = Table(show_header=False, box=box.ROUNDED, padding=(0, 2))

@@ -8,7 +8,13 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from raindrop.commands.common import format_location, geocode, om, resolve_location_or_fail
+from raindrop.commands.common import (
+    format_location,
+    format_weather_source,
+    geocode,
+    resolve_location_or_fail,
+    resolve_weather_provider_or_fail,
+)
 from raindrop.settings import get_settings
 from raindrop.utils import format_time as format_clock_time
 from raindrop.utils import now_in_timezone
@@ -59,10 +65,12 @@ def astro(location: str | None, country: str | None, as_json: bool):
 
     location, country = resolve_location_or_fail(settings, location, country, "astro")
 
+    weather_provider = resolve_weather_provider_or_fail(None, settings)
+
     result = geocode(location, country)
 
     # Get sunrise/sunset data for today and tomorrow
-    weather = om.forecast(
+    weather = weather_provider.forecast(
         result.latitude,
         result.longitude,
         daily=[
@@ -113,6 +121,11 @@ def astro(location: str | None, country: str | None, as_json: bool):
                 "longitude": result.longitude,
             },
             "date": today.isoformat(),
+            "source": {
+                "provider": weather_provider.name,
+                "label": weather_provider.label,
+                "attribution": weather_provider.attribution,
+            },
             "sun": {
                 "sunrise": d.sunrise[0],
                 "sunset": d.sunset[0],
@@ -164,7 +177,9 @@ def astro(location: str | None, country: str | None, as_json: bool):
 
     # Display
     console.print(f"\n[bold cyan]{format_location(result)}[/bold cyan]")
-    console.print(f"[dim]Astronomical Data for {today.strftime('%A, %B %d')}[/dim]\n")
+    console.print(
+        f"[dim]Astronomical Data for {today.strftime('%A, %B %d')} · {format_weather_source(weather_provider)}[/dim]\n"
+    )
 
     # Sun section
     console.print("[bold yellow]Sun[/bold yellow]")

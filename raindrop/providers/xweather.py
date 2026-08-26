@@ -34,6 +34,26 @@ XWEATHER_USER_AGENT = "Raindrop/0.1 (+https://github.com/binarydoubling/raindrop
 StationKindFilter = Literal["pws", "official", "all"]
 
 _OBSERVATION_FIELDS = "id,dataSource,loc,place,profile,ob,relativeTo"
+_CONDITION_FIELDS = (
+    "loc,place,profile,"
+    "periods.timestamp,periods.dateTimeISO,periods.tempC,periods.feelslikeC,"
+    "periods.humidity,periods.dewpointC,periods.pressureMB,periods.spressureMB,"
+    "periods.altimeterMB,periods.windSpeedKPH,periods.windGustKPH,periods.windDirDEG,"
+    "periods.precipMM,periods.precipRateMM,periods.snowCM,periods.snowRateCM,"
+    "periods.visibilityKM,periods.sky,periods.weather,periods.weatherPrimary,"
+    "periods.weatherPrimaryCoded,periods.uvi,periods.solradWM2,periods.isDay"
+)
+_FORECAST_FIELDS = (
+    "loc,place,profile,"
+    "periods.timestamp,periods.dateTimeISO,periods.maxTempC,periods.minTempC,"
+    "periods.avgTempC,periods.tempC,periods.feelslikeC,periods.maxFeelslikeC,"
+    "periods.minFeelslikeC,periods.avgFeelslikeC,periods.dewpointC,periods.humidity,"
+    "periods.pop,periods.precipMM,periods.snowCM,periods.pressureMB,"
+    "periods.windSpeedKPH,periods.windSpeedMaxKPH,periods.windGustKPH,"
+    "periods.windDirDEG,periods.sky,periods.visibilityKM,periods.weather,"
+    "periods.weatherPrimary,periods.weatherPrimaryCoded,periods.uvi,periods.solradWM2,"
+    "periods.isDay,periods.sunriseISO,periods.sunsetISO"
+)
 _AUTH_QUERY_KEYS = {"client_id", "client_secret", "api_key", "apikey", "access_token"}
 
 
@@ -204,6 +224,35 @@ class XweatherClient:
         )
         return _sanitize_payload(payload)
 
+    def conditions_raw(self, latitude: float, longitude: float) -> dict[str, Any]:
+        """Return Xweather conditions for a coordinate without credentials."""
+        params = {"fields": _CONDITION_FIELDS}
+        cache_key = f"xweather:conditions:{latitude:.5f}:{longitude:.5f}"
+        payload = self._request(
+            "conditions/" + _coordinate_id(latitude, longitude), params, cache_key=cache_key, ttl=60
+        )
+        return _sanitize_payload(payload)
+
+    def forecast_raw(
+        self,
+        latitude: float,
+        longitude: float,
+        *,
+        interval: str,
+        limit: int,
+    ) -> dict[str, Any]:
+        """Return Xweather forecast periods for a coordinate without credentials."""
+        params = {
+            "filter": interval,
+            "limit": str(limit),
+            "fields": _FORECAST_FIELDS,
+        }
+        cache_key = f"xweather:forecasts:{latitude:.5f}:{longitude:.5f}:{interval}:{limit}"
+        payload = self._request(
+            "forecasts/" + _coordinate_id(latitude, longitude), params, cache_key=cache_key, ttl=600
+        )
+        return _sanitize_payload(payload)
+
     def current_observation(self, station_id: str) -> StationObservation:
         """Return the current observation for a specific station ID."""
         payload = self.current_raw(station_id)
@@ -235,8 +284,9 @@ class XweatherClient:
     ) -> dict[str, Any]:
         """Make a credentialed Xweather request with a credential-free cache key."""
 
+        client_id, client_secret = self.credential.split_client_credentials()
+
         def fetch() -> dict[str, Any]:
-            client_id, client_secret = self.credential.split_client_credentials()
             auth_params = params | {"client_id": client_id, "client_secret": client_secret}
             url = f"{self.base_url}/{endpoint}?{urllib.parse.urlencode(auth_params)}"
             request = urllib.request.Request(
@@ -492,6 +542,10 @@ def _add_measurement(
 
 def _filter_for_kind(kind: StationKindFilter) -> str:
     return {"pws": "pws", "official": "metar", "all": "allstations"}[kind]
+
+
+def _coordinate_id(latitude: float, longitude: float) -> str:
+    return urllib.parse.quote(f"{latitude:.5f},{longitude:.5f}", safe=",")
 
 
 def _station_kind(data_source: str | None, station_id: str) -> StationKind:

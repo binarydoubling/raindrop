@@ -7,7 +7,11 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from raindrop.commands.common import geocode, om
+from raindrop.commands.common import (
+    format_weather_source,
+    geocode,
+    resolve_weather_provider_or_fail,
+)
 from raindrop.settings import get_settings
 from raindrop.utils import (
     TEMP_SYMBOLS,
@@ -38,6 +42,8 @@ def compare(locations: tuple[str, ...], as_json: bool):
     temp_symbol = TEMP_SYMBOLS[settings.temperature_unit]
     wind_symbol = WIND_SYMBOLS[settings.wind_speed_unit]
 
+    weather_provider = resolve_weather_provider_or_fail(None, settings)
+
     # Fetch weather for all locations
     results = []
     for loc in locations:
@@ -46,7 +52,7 @@ def compare(locations: tuple[str, ...], as_json: bool):
             resolved_loc, resolved_country = settings.resolve_location(loc)
             geo = geocode(resolved_loc, resolved_country)
 
-            weather = om.forecast(
+            weather = weather_provider.forecast(
                 geo.latitude,
                 geo.longitude,
                 current=[
@@ -92,6 +98,11 @@ def compare(locations: tuple[str, ...], as_json: bool):
     # JSON output
     if as_json:
         data = {
+            "source": {
+                "provider": weather_provider.name,
+                "label": weather_provider.label,
+                "attribution": weather_provider.attribution,
+            },
             "locations": results,
             "units": {
                 "temperature": settings.temperature_unit,
@@ -102,7 +113,8 @@ def compare(locations: tuple[str, ...], as_json: bool):
         return
 
     # Table output
-    console.print("\n[bold]Weather Comparison[/bold]\n")
+    console.print("\n[bold]Weather Comparison[/bold]")
+    console.print(f"[dim]{format_weather_source(weather_provider)}[/dim]\n")
 
     table = Table(show_header=True, box=box.ROUNDED, header_style="bold")
     table.add_column("Location", style="cyan")

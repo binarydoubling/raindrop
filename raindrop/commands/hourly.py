@@ -10,10 +10,10 @@ from rich.table import Table
 
 from raindrop.commands.common import (
     format_location,
+    format_weather_source,
     geocode,
-    om,
     resolve_location_or_fail,
-    resolve_model_or_fail,
+    resolve_weather_provider_or_fail,
 )
 from raindrop.settings import get_settings
 from raindrop.utils import (
@@ -47,7 +47,7 @@ console = Console()
     "-m",
     "--model",
     "model_name",
-    help="Weather model to use (see 'raindrop config models')",
+    help="Open-Meteo model to use (forces Open-Meteo in auto mode)",
 )
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.option("--spark", is_flag=True, help="Show sparkline summary")
@@ -67,11 +67,11 @@ def hourly(
 
     location, country = resolve_location_or_fail(settings, location, country, "hourly")
 
-    model_key, models = resolve_model_or_fail(model_name, settings)
+    weather_provider = resolve_weather_provider_or_fail(model_name, settings)
 
     result = geocode(location, country)
 
-    weather = om.forecast(
+    weather = weather_provider.forecast(
         result.latitude,
         result.longitude,
         hourly=[
@@ -84,7 +84,6 @@ def hourly(
         ],
         temperature_unit=settings.temperature_unit,
         wind_speed_unit=settings.wind_speed_unit,
-        models=models,
         forecast_days=2,  # Need 2 days to get enough hours
     )
     h = weather.hourly
@@ -132,7 +131,12 @@ def hourly(
                 "latitude": result.latitude,
                 "longitude": result.longitude,
             },
-            "model": model_key or "auto",
+            "model": weather_provider.model_label,
+            "source": {
+                "provider": weather_provider.name,
+                "label": weather_provider.label,
+                "attribution": weather_provider.attribution,
+            },
             "hours": hourly_data,
             "units": {
                 "temperature": settings.temperature_unit,
@@ -174,7 +178,8 @@ def hourly(
             f"{max(precip_clean):.0f}%" if precip_clean and max(precip_clean) > 0 else "\u2014"
         )
 
-        console.print(f"\n[bold cyan]{result.name}[/bold cyan] [dim]Next {hours}h[/dim]\n")
+        console.print(f"\n[bold cyan]{result.name}[/bold cyan] [dim]Next {hours}h[/dim]")
+        console.print(f"[dim]{format_weather_source(weather_provider)}[/dim]\n")
         console.print(f"[dim]Temp[/dim]   {sparkline(temp_vals)}  {temp_range}")
         console.print(f"[dim]Precip[/dim] {sparkline(precip_vals)}  {precip_max}")
         console.print(f"[dim]Wind[/dim]   {sparkline(wind_vals)}  {wind_range}")
@@ -182,7 +187,7 @@ def hourly(
 
     # Location header
     console.print(f"\n[bold cyan]{format_location(result, include_country=False)}[/bold cyan]")
-    console.print(f"[dim]Next {hours} hours[/dim]\n")
+    console.print(f"[dim]Next {hours} hours · {format_weather_source(weather_provider)}[/dim]\n")
 
     # Build the table
     table = Table(box=box.ROUNDED, show_header=True, header_style="bold")

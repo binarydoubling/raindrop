@@ -6,6 +6,7 @@ import click
 
 from raindrop.open_meteo import GeocodingResult, NWSClient, OpenMeteo, OpenMeteoError
 from raindrop.settings import Settings, normalize_country_code, resolve_model
+from raindrop.weather_provider import WeatherProviderSelection, select_weather_provider
 
 om = OpenMeteo()
 nws = NWSClient()
@@ -54,11 +55,29 @@ def resolve_model_or_fail(
     model_name: str | None,
     settings: Settings,
 ) -> tuple[str | None, list[str] | None]:
-    """Resolve a weather model and convert validation failures to Click errors."""
+    """Resolve an Open-Meteo model and convert validation failures to Click errors."""
     try:
         return resolve_model(model_name, settings)
     except ValueError as e:
         raise click.ClickException(str(e)) from e
+
+
+def resolve_weather_provider_or_fail(
+    model_name: str | None,
+    settings: Settings,
+) -> WeatherProviderSelection:
+    """Resolve the weather provider and convert validation failures to Click errors."""
+    try:
+        return select_weather_provider(settings, model_name)
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
+
+
+def format_weather_source(selection: WeatherProviderSelection) -> str:
+    """Return a concise weather source label with attribution when needed."""
+    if selection.attribution:
+        return f"Source: {selection.model_label} · {selection.attribution}"
+    return f"Source: {selection.label} · Model: {selection.model_label}"
 
 
 def location_payload(result: GeocodingResult) -> dict[str, Any]:

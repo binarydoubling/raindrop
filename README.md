@@ -190,17 +190,18 @@ Use `raindrop config set units metric|imperial` to switch unit presets.
 Settings live at `$RAINDROP_CONFIG_DIR/config.json`, `$XDG_CONFIG_HOME/raindrop/config.json`, or `~/.config/raindrop/config.json`.
 API responses are cached under `$RAINDROP_CACHE_DIR`, `$XDG_CACHE_HOME/raindrop`, or `~/.cache/raindrop`.
 
-Optional Xweather credentials for `raindrop stations` can be supplied with `XWEATHER_API_KEY` or a mode-0600 JSON file at the same config directory, e.g. `~/.config/raindrop/xweather.json`:
+Optional Xweather credentials for Xweather-backed forecasts and `raindrop stations` can be supplied with `XWEATHER_API_KEY` or a mode-0600 JSON file at the same config directory, e.g. `~/.config/raindrop/xweather.json`:
 
 ```json
 {"api_key":"<your combined Xweather API key>"}
 ```
 
-Existing forecast/current commands remain keyless. `raindrop config show` only reports Xweather as configured/not configured and never prints the key.
+Existing forecast/current commands remain keyless through Open-Meteo fallback. With `weather_provider=auto`, Raindrop uses Xweather when credentials are configured unless an Open-Meteo model is selected. `raindrop config show` only reports Xweather as configured/not configured and never prints the key.
 
 ```bash
 raindrop config show                  # view current settings
 raindrop config set units metric      # switch to metric
+raindrop config set weather_provider xweather  # prefer Xweather explicitly
 raindrop config set location "NYC"    # set default location
 raindrop config cache                 # view cache stats
 raindrop config cache --clear         # clear cache
@@ -214,6 +215,7 @@ raindrop config cache --clear         # clear cache
 | `precipitation_unit` | `mm`, `inch` | `mm` | Precipitation display unit |
 | `location` | any string | none | Default location |
 | `country_code` | ISO 3166-1 alpha-2 | none | Default country filter |
+| `weather_provider` | `auto`, `open-meteo`, `xweather` | `auto` | Forecast provider; auto prefers configured Xweather, otherwise Open-Meteo |
 | `model` | `auto` or `raindrop config models` value | `auto` | Open-Meteo forecast model |
 
 ---
@@ -235,20 +237,21 @@ raindrop completions fish > ~/.config/fish/completions/raindrop.fish
 
 ## How It Works
 
-Raindrop combines several free/open APIs for core weather, with optional credentialed providers for measured observations:
+Raindrop combines free/open APIs with optional credentialed Xweather integration:
 
 | API | Purpose |
 |-----|---------|
 | [Open-Meteo](https://open-meteo.com/) | Forecasts, historical data, air quality, geocoding |
 | [OSRM](http://project-osrm.org/) | Real driving routes via OpenStreetMap |
 | [NWS](https://www.weather.gov/documentation/services-web-api) | Weather alerts and forecast discussions (US) |
-| [Xweather](https://www.xweather.com/) | Optional measured personal/official station observations |
+| [Xweather](https://www.xweather.com/) | Optional forecasts/current conditions and measured personal/official station observations |
 
 The entire project has only **2 runtime dependencies** (Click and Rich). HTTP, caching, geocoding, credentials, and astronomical calculations are all handled with Python's standard library.
 
 ### Technical Highlights
 
 - **Weather window scene engine** that infers air texture, sky, light, motion, surface, and horizon from combined variables
+- **Provider-neutral weather commands** normalized across Open-Meteo and Xweather
 - **Measured station observations** with provider/source identity, timestamps, QC/trust labels, freshness filtering, and safe credential-free cache keys
 - **Sparklines** via Unicode block characters (`▁▂▃▄▅▆▇█`)
 - **EMA crossovers** and rate-of-change analysis on temperature data

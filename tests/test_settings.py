@@ -23,6 +23,7 @@ def test_settings_round_trip() -> None:
         temperature_unit="celsius",
         wind_speed_unit="kmh",
         precipitation_unit="mm",
+        weather_provider="xweather",
         model="gfs",
         favorites={"home": Favorite(name="Seattle", country_code="US")},
     )
@@ -34,6 +35,7 @@ def test_settings_round_trip() -> None:
     assert loaded.country_code == "US"
     assert loaded.temperature_unit == "celsius"
     assert loaded.wind_speed_unit == "kmh"
+    assert loaded.weather_provider == "xweather"
     assert loaded.model == "gfs"
     assert loaded.favorites["home"].name == "Seattle"
 
@@ -54,6 +56,7 @@ def test_settings_load_validates_untrusted_schema() -> None:
                 "wind_speed_unit": "warp",
                 "precipitation_unit": "buckets",
                 "country_code": "USA",
+                "weather_provider": "storm-machine",
                 "favorites": ["not", "a", "dict"],
             }
         )
@@ -65,6 +68,7 @@ def test_settings_load_validates_untrusted_schema() -> None:
     assert loaded.wind_speed_unit == "mph"
     assert loaded.precipitation_unit == "mm"
     assert loaded.country_code is None
+    assert loaded.weather_provider == "auto"
     assert loaded.favorites == {}
 
 

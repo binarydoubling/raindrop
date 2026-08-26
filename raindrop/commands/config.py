@@ -13,7 +13,9 @@ from raindrop.settings import (
     AVAILABLE_MODELS,
     PRECIPITATION_UNITS,
     TEMPERATURE_UNITS,
+    WEATHER_PROVIDERS,
     WIND_SPEED_UNITS,
+    WeatherProviderName,
     get_settings,
     normalize_country_code,
 )
@@ -41,6 +43,7 @@ def config_show():
     table.add_row("temperature_unit", settings.temperature_unit)
     table.add_row("wind_speed_unit", settings.wind_speed_unit)
     table.add_row("precipitation_unit", settings.precipitation_unit)
+    table.add_row("weather_provider", settings.weather_provider)
     table.add_row("model", settings.model or "(auto)")
     xweather = get_xweather_credential_status()
     if xweather.configured:
@@ -65,7 +68,8 @@ def config_set(key: str, value: str):
       temperature_unit   celsius or fahrenheit
       wind_speed_unit    kmh, ms, mph, or kn
       precipitation_unit mm or inch
-      model              Weather model (see 'raindrop config models')
+      weather_provider  auto, open-meteo, or xweather
+      model              Open-Meteo weather model (see 'raindrop config models')
     """
     settings = get_settings()
 
@@ -101,6 +105,12 @@ def config_set(key: str, value: str):
         if normalized_value not in PRECIPITATION_UNITS:
             raise click.ClickException("precipitation_unit must be 'mm' or 'inch'")
         settings.precipitation_unit = cast(PrecipitationUnit, normalized_value)
+    elif key == "weather_provider":
+        if normalized_value not in WEATHER_PROVIDERS:
+            raise click.ClickException(
+                "weather_provider must be 'auto', 'open-meteo', or 'xweather'"
+            )
+        settings.weather_provider = cast(WeatherProviderName, normalized_value)
     elif key == "model":
         if normalized_value == "auto":
             settings.model = None
@@ -127,6 +137,8 @@ def config_unset(key: str):
         settings.location = None
     elif key == "country_code":
         settings.country_code = None
+    elif key == "weather_provider":
+        settings.weather_provider = "auto"
     elif key == "model":
         settings.model = None
     elif key in ("units", "temperature_unit", "wind_speed_unit", "precipitation_unit"):

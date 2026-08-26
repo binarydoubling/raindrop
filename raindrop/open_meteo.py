@@ -384,7 +384,7 @@ class DailyWeather:
 
 @dataclass
 class ForecastResult:
-    """Weather forecast response. All fields are guaranteed present."""
+    """Weather forecast response normalized for Raindrop commands."""
 
     latitude: float
     longitude: float
@@ -395,6 +395,9 @@ class ForecastResult:
     current: CurrentWeather | None = None
     hourly: HourlyWeather | None = None
     daily: DailyWeather | None = None
+    provider: str = "open-meteo"
+    provider_label: str = "Open-Meteo"
+    attribution: str | None = None
 
 
 # =============================================================================
