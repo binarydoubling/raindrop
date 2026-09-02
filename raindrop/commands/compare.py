@@ -1,13 +1,12 @@
 """Compare weather across locations command."""
 
-import json as json_lib
-
 import click
 from rich import box
-from rich.console import Console
 from rich.table import Table
 
 from raindrop.commands.common import (
+    console,
+    echo_json,
     format_weather_source,
     geocode,
     resolve_weather_provider_or_fail,
@@ -18,8 +17,7 @@ from raindrop.utils import (
     WEATHER_LABELS,
     WIND_SYMBOLS,
 )
-
-console = Console()
+from raindrop.weather_provider import provider_source_payload
 
 
 @click.command()
@@ -98,18 +96,14 @@ def compare(locations: tuple[str, ...], as_json: bool):
     # JSON output
     if as_json:
         data = {
-            "source": {
-                "provider": weather_provider.name,
-                "label": weather_provider.label,
-                "attribution": weather_provider.attribution,
-            },
+            "source": provider_source_payload(weather_provider),
             "locations": results,
             "units": {
                 "temperature": settings.temperature_unit,
                 "wind_speed": settings.wind_speed_unit,
             },
         }
-        click.echo(json_lib.dumps(data, indent=2))
+        echo_json(data)
         return
 
     # Table output

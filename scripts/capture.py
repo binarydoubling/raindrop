@@ -7,6 +7,7 @@ Usage:
 """
 
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -17,41 +18,22 @@ from rich.text import Text
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets"
 
-# Commands to capture: (name, args, title)
 COMMANDS = [
-    ("current", ["raindrop", "current", "Seattle"], "raindrop current Seattle"),
-    (
-        "hourly",
-        ["raindrop", "hourly", "Seattle", "--hours", "12", "--spark"],
-        "raindrop hourly Seattle --hours 12 --spark",
-    ),
-    ("daily", ["raindrop", "daily", "Seattle"], "raindrop daily Seattle"),
-    (
-        "route",
-        ["raindrop", "route", "Seattle", "San Francisco", "-i", "100"],
-        "raindrop route Seattle 'San Francisco' -i 100",
-    ),
-    (
-        "compare",
-        ["raindrop", "compare", "Seattle", "Portland", "San Francisco"],
-        "raindrop compare Seattle Portland 'San Francisco'",
-    ),
-    ("alerts", ["raindrop", "alerts", "Seattle"], "raindrop alerts Seattle"),
-    ("aqi", ["raindrop", "aqi", "Seattle"], "raindrop aqi Seattle"),
-    ("astro", ["raindrop", "astro", "Seattle"], "raindrop astro Seattle"),
-    ("marine", ["raindrop", "marine", "San Diego"], "raindrop marine 'San Diego'"),
-    ("clothing", ["raindrop", "clothing", "Seattle"], "raindrop clothing Seattle"),
-    ("history", ["raindrop", "history", "Seattle"], "raindrop history Seattle"),
-    (
-        "precip",
-        ["raindrop", "precip", "Seattle", "--days", "7"],
-        "raindrop precip Seattle --days 7",
-    ),
+    ["raindrop", "current", "Seattle"],
+    ["raindrop", "hourly", "Seattle", "--hours", "12", "--spark"],
+    ["raindrop", "daily", "Seattle"],
+    ["raindrop", "route", "Seattle", "San Francisco", "-i", "100"],
+    ["raindrop", "compare", "Seattle", "Portland", "San Francisco"],
+    ["raindrop", "aqi", "Seattle"],
+    ["raindrop", "astro", "Seattle"],
+    ["raindrop", "marine", "San Diego"],
+    ["raindrop", "clothing", "Seattle"],
 ]
 
 
-def capture(name: str, args: list[str], title: str) -> None:
+def capture(args: list[str]) -> None:
     """Run a command and save its output as an SVG."""
+    name = args[1]
     print(f"  Capturing {name}...", end=" ", flush=True)
 
     env = os.environ.copy()
@@ -59,20 +41,12 @@ def capture(name: str, args: list[str], title: str) -> None:
     env["TERM"] = "xterm-256color"
 
     try:
-        result = subprocess.run(
-            args,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            env=env,
-        )
-        output = result.stdout
-        if result.stderr and not output:
-            output = result.stderr
+        result = subprocess.run(args, capture_output=True, text=True, timeout=30, env=env)
+        output = result.stdout or result.stderr
     except subprocess.TimeoutExpired:
         print("TIMEOUT")
         return
-    except Exception as e:
+    except OSError as e:
         print(f"ERROR: {e}")
         return
 
@@ -81,31 +55,28 @@ def capture(name: str, args: list[str], title: str) -> None:
         return
 
     console = Console(record=True, width=90, force_terminal=True)
-    text = Text.from_ansi(output)
-    console.print(text, end="")
-
-    svg = console.export_svg(title=title)
+    console.print(Text.from_ansi(output), end="")
+    svg = console.export_svg(title=shlex.join(args))
     out_path = ASSETS / f"{name}.svg"
     out_path.write_text(svg)
     print(f"OK -> {out_path.relative_to(ROOT)}")
 
 
 def main() -> None:
+    """Capture requested commands, or every configured command."""
     ASSETS.mkdir(exist_ok=True)
-
-    if len(sys.argv) > 1:
-        targets = sys.argv[1:]
-        commands = [c for c in COMMANDS if c[0] in targets]
-        if not commands:
-            print(f"Unknown command(s): {', '.join(targets)}")
-            print(f"Available: {', '.join(c[0] for c in COMMANDS)}")
-            sys.exit(1)
-    else:
-        commands = COMMANDS
+    targets = sys.argv[1:]
+    commands = [args for args in COMMANDS if not targets or args[1] in targets]
+    if targets and len(commands) != len(set(targets)):
+        available = {args[1] for args in COMMANDS}
+        unknown = [target for target in targets if target not in available]
+        print(f"Unknown command(s): {', '.join(unknown)}")
+        print(f"Available: {', '.join(sorted(available))}")
+        raise SystemExit(1)
 
     print(f"Capturing {len(commands)} command(s):\n")
-    for name, args, title in commands:
-        capture(name, args, title)
+    for args in commands:
+        capture(args)
     print("\nDone.")
 
 

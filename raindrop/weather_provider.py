@@ -33,7 +33,11 @@ XWEATHER_MAX_HOURLY_PERIODS = 168
 class WeatherProvider(Protocol):
     """Protocol for forecast providers."""
 
-    name: ResolvedWeatherProviderName
+    @property
+    def name(self) -> ResolvedWeatherProviderName:
+        """Return the provider identifier."""
+        ...
+
     label: str
     attribution: str | None
 
@@ -126,59 +130,6 @@ class WeatherProviderSelection:
             models=self.models,
             cell_selection=cell_selection,
         )
-
-
-class OpenMeteoWeatherProvider:
-    """Open-Meteo forecast provider adapter."""
-
-    name: ResolvedWeatherProviderName = "open-meteo"
-    label: str = "Open-Meteo"
-    attribution: str | None = None
-
-    def __init__(self, client: OpenMeteo | None = None) -> None:
-        self.client = client or OpenMeteo()
-
-    def forecast(
-        self,
-        latitude: float,
-        longitude: float,
-        *,
-        current: list[str] | None = None,
-        hourly: list[str] | None = None,
-        daily: list[str] | None = None,
-        temperature_unit: TemperatureUnit = "celsius",
-        wind_speed_unit: WindSpeedUnit = "kmh",
-        precipitation_unit: PrecipitationUnit = "mm",
-        timezone: str = "auto",
-        forecast_days: int = 7,
-        past_days: int = 0,
-        start_date: str | None = None,
-        end_date: str | None = None,
-        models: list[str] | None = None,
-        cell_selection: CellSelection = "land",
-    ) -> ForecastResult:
-        """Fetch Open-Meteo forecast data."""
-        result = self.client.forecast(
-            latitude,
-            longitude,
-            current=current,
-            hourly=hourly,
-            daily=daily,
-            temperature_unit=temperature_unit,
-            wind_speed_unit=wind_speed_unit,
-            precipitation_unit=precipitation_unit,
-            timezone=timezone,
-            forecast_days=forecast_days,
-            past_days=past_days,
-            start_date=start_date,
-            end_date=end_date,
-            models=models,
-            cell_selection=cell_selection,
-        )
-        result.provider = self.name
-        result.provider_label = self.label
-        result.attribution = self.attribution
-        return result
 
 
 class XweatherWeatherProvider:
@@ -311,11 +262,7 @@ def select_weather_provider(
 
     if provider_name == "open-meteo":
         model_key, models = resolve_model(model_name, settings)
-        return WeatherProviderSelection(
-            client=OpenMeteoWeatherProvider(),
-            model_key=model_key,
-            models=models,
-        )
+        return WeatherProviderSelection(client=OpenMeteo(), model_key=model_key, models=models)
 
     if model_name:
         raise ValueError("--model selects Open-Meteo models and cannot be used with Xweather")
@@ -327,7 +274,6 @@ def provider_source_payload(selection: WeatherProviderSelection) -> dict[str, st
     return {
         "provider": selection.name,
         "label": selection.label,
-        "model": selection.model_label,
         "attribution": selection.attribution,
     }
 

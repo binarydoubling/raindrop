@@ -3,10 +3,10 @@
 from typing import cast
 
 import click
-from rich.console import Console
 from rich.table import Table
 
 from raindrop.cache import get_cache
+from raindrop.commands.common import console
 from raindrop.open_meteo import PrecipitationUnit, TemperatureUnit, WindSpeedUnit
 from raindrop.providers.xweather import get_xweather_credential_status
 from raindrop.settings import (
@@ -19,8 +19,6 @@ from raindrop.settings import (
     get_settings,
     normalize_country_code,
 )
-
-console = Console()
 
 
 @click.group()

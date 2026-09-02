@@ -1,15 +1,15 @@
 """Weather window command: describe what it feels like to stand somewhere."""
 
-import json as json_lib
 from dataclasses import asdict
 
 import click
 from rich import box
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 from raindrop.commands.common import (
+    console,
+    echo_json,
     format_location,
     format_weather_source,
     geocode,
@@ -20,8 +20,7 @@ from raindrop.commands.common import (
 from raindrop.scene import SceneReading, build_scene_report
 from raindrop.settings import get_settings
 from raindrop.utils import WEATHER_CODES, find_time_index, now_in_timezone
-
-console = Console()
+from raindrop.weather_provider import provider_source_payload
 
 
 def _at_index[T](values: list[T] | None, index: int) -> T | None:
@@ -139,16 +138,12 @@ def window(
             "location": location_payload(result),
             "timezone": weather.timezone,
             "model": weather_provider.model_label,
-            "source": {
-                "provider": weather_provider.name,
-                "label": weather_provider.label,
-                "attribution": weather_provider.attribution,
-            },
+            "source": provider_source_payload(weather_provider),
             "weather_description": WEATHER_CODES.get(c.weather_code or 0, "Unknown"),
             "reading": asdict(reading),
             "scene": report.to_dict(),
         }
-        click.echo(json_lib.dumps(data, indent=2))
+        echo_json(data)
         return
 
     if compact:

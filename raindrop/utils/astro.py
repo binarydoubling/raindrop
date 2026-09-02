@@ -4,23 +4,6 @@ import math
 from datetime import datetime, timedelta
 
 
-def julian_day(dt: datetime) -> float:
-    """Calculate Julian Day Number from a datetime."""
-    year = dt.year
-    month = dt.month
-    day = dt.day + dt.hour / 24 + dt.minute / 1440 + dt.second / 86400
-
-    if month <= 2:
-        year -= 1
-        month += 12
-
-    a = int(year / 100)
-    b = 2 - a + int(a / 4)
-
-    jd = int(365.25 * (year + 4716)) + int(30.6001 * (month + 1)) + day + b - 1524.5
-    return jd
-
-
 def moon_phase(dt: datetime) -> tuple[float, str, str]:
     """
     Calculate moon phase for a given date.

@@ -1,17 +1,18 @@
 """Daily forecast command."""
 
-import json as json_lib
 from datetime import datetime, timedelta
 
 import click
 from rich import box
-from rich.console import Console
 from rich.table import Table
 
 from raindrop.commands.common import (
+    console,
+    echo_json,
     format_location,
     format_weather_source,
     geocode,
+    location_payload,
     resolve_location_or_fail,
     resolve_weather_provider_or_fail,
 )
@@ -24,12 +25,12 @@ from raindrop.utils import (
     calc_roc,
     calc_volatility,
     ema,
+    format_delta,
     now_in_timezone,
     roc_signal,
     trend_signal,
 )
-
-console = Console()
+from raindrop.weather_provider import provider_source_payload
 
 
 @click.command()
@@ -76,8 +77,6 @@ def daily(
             "weather_code",
             "temperature_2m_max",
             "temperature_2m_min",
-            "apparent_temperature_max",
-            "apparent_temperature_min",
             "precipitation_sum",
             "precipitation_probability_max",
             "wind_speed_10m_max",
@@ -164,19 +163,9 @@ def daily(
             )
 
         data = {
-            "location": {
-                "name": result.name,
-                "admin1": result.admin1,
-                "country": result.country,
-                "latitude": result.latitude,
-                "longitude": result.longitude,
-            },
+            "location": location_payload(result),
             "model": weather_provider.model_label,
-            "source": {
-                "provider": weather_provider.name,
-                "label": weather_provider.label,
-                "attribution": weather_provider.attribution,
-            },
+            "source": provider_source_payload(weather_provider),
             "days": daily_data,
             "units": {
                 "temperature": settings.temperature_unit,
@@ -184,7 +173,7 @@ def daily(
                 "precipitation": settings.precipitation_unit,
             },
         }
-        click.echo(json_lib.dumps(data, indent=2))
+        echo_json(data)
         return
 
     # Location header
@@ -226,29 +215,16 @@ def daily(
         low = lows[i] if i < len(lows) else 0
         vol = volatility[i] if i < len(volatility) else 0
 
-        # High with delta
-        if i > 0 and i < len(highs):
-            high_delta = high - highs[i - 1]
-            if abs(high_delta) < 1:
-                high_str = f"{high:.0f}\u00b0{temp_symbol} [dim]\u00b7[/dim]"
-            elif high_delta > 0:
-                high_str = f"{high:.0f}\u00b0{temp_symbol} [red]\u2191{abs(high_delta):.0f}[/red]"
-            else:
-                high_str = f"{high:.0f}\u00b0{temp_symbol} [cyan]\u2193{abs(high_delta):.0f}[/cyan]"
-        else:
-            high_str = f"{high:.0f}\u00b0{temp_symbol}"
-
-        # Low with delta
-        if i > 0 and i < len(lows):
-            low_delta = low - lows[i - 1]
-            if abs(low_delta) < 1:
-                low_str = f"{low:.0f}\u00b0{temp_symbol} [dim]\u00b7[/dim]"
-            elif low_delta > 0:
-                low_str = f"{low:.0f}\u00b0{temp_symbol} [red]\u2191{abs(low_delta):.0f}[/red]"
-            else:
-                low_str = f"{low:.0f}\u00b0{temp_symbol} [cyan]\u2193{abs(low_delta):.0f}[/cyan]"
-        else:
-            low_str = f"{low:.0f}\u00b0{temp_symbol}"
+        high_str = (
+            format_delta(high, highs[i - 1], f"\u00b0{temp_symbol}")
+            if 0 < i < len(highs)
+            else f"{high:.0f}\u00b0{temp_symbol}"
+        )
+        low_str = (
+            format_delta(low, lows[i - 1], f"\u00b0{temp_symbol}")
+            if 0 < i < len(lows)
+            else f"{low:.0f}\u00b0{temp_symbol}"
+        )
 
         # Range (volatility)
         range_str = f"{vol:.0f}\u00b0"

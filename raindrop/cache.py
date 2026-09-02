@@ -115,17 +115,6 @@ class Cache:
         except (TypeError, OSError):
             pass  # Silently fail on write errors
 
-    def delete(self, key: str) -> bool:
-        """Delete a cache entry. Returns True if deleted."""
-        if not self.enabled:
-            return False
-
-        cache_path = self._get_cache_path(key)
-        if cache_path.exists():
-            cache_path.unlink()
-            return True
-        return False
-
     def clear(self) -> int:
         """Clear all cache entries. Returns number of entries cleared."""
         if not self.enabled or not self.cache_dir.exists():

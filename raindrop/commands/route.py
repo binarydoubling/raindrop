@@ -5,27 +5,33 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
-from math import asin, cos, radians, sin, sqrt
 
 import click
 from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from raindrop.commands.common import geocode, resolve_weather_provider_or_fail
+from raindrop.commands.common import (
+    console,
+    echo_json,
+    format_weather_source,
+    geocode,
+    location_payload,
+    resolve_weather_provider_or_fail,
+)
 from raindrop.settings import Settings, get_settings
 from raindrop.utils import (
     TEMP_SYMBOLS,
     WEATHER_LABELS,
     WIND_SYMBOLS,
     find_time_index,
+    format_duration,
     format_time,
     now_in_timezone,
     sparkline,
 )
-from raindrop.weather_provider import WeatherProviderSelection
+from raindrop.weather_provider import WeatherProviderSelection, provider_source_payload
 
-console = Console()
 progress_console = Console(stderr=True)
 
 # OSRM public demo server
@@ -33,16 +39,6 @@ OSRM_BASE_URL = "https://router.project-osrm.org"
 
 # Weather check interval in miles
 WEATHER_INTERVAL_MILES = 50
-
-
-def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calculate great circle distance in kilometers between two points."""
-    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
-    c = 2 * asin(sqrt(a))
-    return 6371 * c  # Earth radius in km
 
 
 def get_osrm_route(
@@ -55,8 +51,7 @@ def get_osrm_route(
     Returns dict with:
         - distance: total distance in meters
         - duration: total duration in seconds
-        - geometry: list of [lon, lat] coordinates along route
-        - legs: list of route legs with steps
+        - legs: route legs with turn-by-turn steps
     """
     # OSRM expects lon,lat order
     coords = f"{origin[1]},{origin[0]};{destination[1]},{destination[0]}"
@@ -64,8 +59,7 @@ def get_osrm_route(
     params = {
         "overview": "full",
         "geometries": "geojson",
-        "steps": "true",  # Get turn-by-turn
-        "annotations": "true",  # Get speed/duration per segment
+        "steps": "true",
     }
 
     query = urllib.parse.urlencode(params)
@@ -86,8 +80,7 @@ def get_osrm_route(
         return {
             "distance": route["distance"],  # meters
             "duration": route["duration"],  # seconds
-            "geometry": route["geometry"]["coordinates"],  # List of [lon, lat]
-            "legs": route["legs"],  # Contains steps with directions
+            "legs": route["legs"],
         }
     except urllib.error.URLError as e:
         raise Exception(f"Could not connect to routing service: {e}")
@@ -111,145 +104,80 @@ def parse_road_name(step: dict) -> str:
 
 
 def parse_maneuver(step: dict) -> str:
-    """Parse maneuver instruction from OSRM step."""
+    """Parse an OSRM maneuver into a concise instruction."""
     maneuver = step.get("maneuver", {})
     maneuver_type = maneuver.get("type", "")
     modifier = maneuver.get("modifier", "")
-
-    # Build instruction based on maneuver type
-    if maneuver_type == "depart":
-        return "Depart"
-    elif maneuver_type == "arrive":
-        return "Arrive"
-    elif maneuver_type == "merge":
-        return f"Merge {modifier}" if modifier else "Merge"
-    elif maneuver_type == "on ramp":
-        return "Take on-ramp"
-    elif maneuver_type == "off ramp":
-        return "Take exit"
-    elif maneuver_type == "fork":
+    fixed = {
+        "depart": "Depart",
+        "arrive": "Arrive",
+        "on ramp": "Take on-ramp",
+        "off ramp": "Take exit",
+        "new name": "Continue",
+        "roundabout": "Enter roundabout",
+        "rotary": "Enter rotary",
+        "roundabout turn": "Exit roundabout",
+    }
+    if maneuver_type in fixed:
+        return fixed[maneuver_type]
+    if maneuver_type == "fork":
         return f"Keep {modifier}" if modifier else "Fork"
-    elif maneuver_type == "turn":
-        return f"Turn {modifier}" if modifier else "Turn"
-    elif maneuver_type == "new name":
-        return "Continue"
-    elif maneuver_type == "continue":
-        return f"Continue {modifier}" if modifier else "Continue"
-    elif maneuver_type == "roundabout":
-        return "Enter roundabout"
-    elif maneuver_type == "rotary":
-        return "Enter rotary"
-    elif maneuver_type == "roundabout turn":
-        return "Exit roundabout"
-    elif maneuver_type == "end of road":
+    if maneuver_type == "end of road":
         return f"Turn {modifier}" if modifier else "End of road"
-    else:
-        return maneuver_type.replace("_", " ").title() if maneuver_type else "Continue"
+    if maneuver_type in {"merge", "turn", "continue"}:
+        return f"{maneuver_type.title()} {modifier}".rstrip()
+    return maneuver_type.replace("_", " ").title() if maneuver_type else "Continue"
 
 
 def build_route_segments(route_data: dict) -> list[dict]:
-    """
-    Build route segments from OSRM response.
-    Each segment represents a stretch on one road.
-    """
-    segments = []
-    cumulative_distance = 0  # meters
-    cumulative_duration = 0  # seconds
+    """Build and consolidate consecutive OSRM steps by road."""
+    segments: list[dict] = []
+    cumulative_distance = 0.0
+    cumulative_duration = 0.0
 
     for leg in route_data["legs"]:
         for step in leg.get("steps", []):
             distance = step.get("distance", 0)
             duration = step.get("duration", 0)
-
-            # Get road info
-            road_name = parse_road_name(step)
+            distance_mi = distance * 0.000621371
+            road = parse_road_name(step)
             maneuver = parse_maneuver(step)
-
-            # Get the geometry for this step (first point is start of step)
             geometry = step.get("geometry", {}).get("coordinates", [])
-            if geometry:
-                start_coord = geometry[0]  # [lon, lat]
-                end_coord = geometry[-1]
+
+            merge = (
+                bool(segments)
+                and maneuver == "Continue"
+                and (distance_mi < 0.1 or road == segments[-1]["road"])
+            )
+            if merge:
+                current = segments[-1]
+                current["distance_m"] += distance
+                current["distance_mi"] += distance_mi
+                current["duration_s"] += duration
+                current["end_coord"] = geometry[-1] if geometry else current["end_coord"]
+                current["geometry"].extend(geometry[1:])
+            elif distance_mi < 0.1 and maneuver == "Continue":
+                continue
             else:
-                start_coord = None
-                end_coord = None
-
-            segment = {
-                "road": road_name,
-                "maneuver": maneuver,
-                "distance_m": distance,
-                "distance_mi": distance * 0.000621371,
-                "duration_s": duration,
-                "cumulative_distance_m": cumulative_distance,
-                "cumulative_distance_mi": cumulative_distance * 0.000621371,
-                "cumulative_duration_s": cumulative_duration,
-                "start_coord": start_coord,
-                "end_coord": end_coord,
-                "geometry": geometry,
-            }
-
-            segments.append(segment)
+                segments.append(
+                    {
+                        "road": road,
+                        "maneuver": maneuver,
+                        "distance_m": distance,
+                        "distance_mi": distance_mi,
+                        "duration_s": duration,
+                        "cumulative_distance_m": cumulative_distance,
+                        "cumulative_distance_mi": cumulative_distance * 0.000621371,
+                        "cumulative_duration_s": cumulative_duration,
+                        "start_coord": geometry[0] if geometry else None,
+                        "end_coord": geometry[-1] if geometry else None,
+                        "geometry": list(geometry),
+                    }
+                )
             cumulative_distance += distance
             cumulative_duration += duration
 
     return segments
-
-
-def consolidate_road_segments(segments: list[dict]) -> list[dict]:
-    """
-    Consolidate consecutive segments on the same road.
-    This simplifies the output - we don't need every tiny turn.
-    """
-    if not segments:
-        return []
-
-    consolidated = []
-    current = None
-
-    for seg in segments:
-        road = seg["road"]
-
-        # Skip very short segments (< 0.1 miles) unless it's a significant maneuver
-        if seg["distance_mi"] < 0.1 and seg["maneuver"] in ["Continue", "new name"]:
-            if current:
-                # Add distance to current segment
-                current["distance_m"] += seg["distance_m"]
-                current["distance_mi"] += seg["distance_mi"]
-                current["duration_s"] += seg["duration_s"]
-                current["end_coord"] = seg["end_coord"]
-                current["geometry"].extend(seg["geometry"][1:])  # Avoid duplicate point
-            continue
-
-        if current is None:
-            current = seg.copy()
-            current["geometry"] = list(seg["geometry"])
-        elif road == current["road"] and seg["maneuver"] in ["Continue", "new name"]:
-            # Same road, consolidate
-            current["distance_m"] += seg["distance_m"]
-            current["distance_mi"] += seg["distance_mi"]
-            current["duration_s"] += seg["duration_s"]
-            current["end_coord"] = seg["end_coord"]
-            current["geometry"].extend(seg["geometry"][1:])
-        else:
-            # Different road or significant maneuver
-            consolidated.append(current)
-            current = seg.copy()
-            current["geometry"] = list(seg["geometry"])
-
-    if current:
-        consolidated.append(current)
-
-    # Recalculate cumulative distances
-    cumulative_dist = 0
-    cumulative_dur = 0
-    for seg in consolidated:
-        seg["cumulative_distance_m"] = cumulative_dist
-        seg["cumulative_distance_mi"] = cumulative_dist * 0.000621371
-        seg["cumulative_duration_s"] = cumulative_dur
-        cumulative_dist += seg["distance_m"]
-        cumulative_dur += seg["duration_s"]
-
-    return consolidated
 
 
 def get_weather_checkpoints(
@@ -392,15 +320,6 @@ def get_weather_for_point(
     }
 
 
-def format_duration(seconds: float) -> str:
-    """Format duration in seconds to human readable."""
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    if hours > 0:
-        return f"{hours}h {minutes}m"
-    return f"{minutes}m"
-
-
 @click.command()
 @click.argument("origin")
 @click.argument("destination")
@@ -476,12 +395,8 @@ def route(
     total_duration_s = route_data["duration"]
     total_duration = timedelta(seconds=total_duration_s)
 
-    # Build and consolidate route segments
     segments = build_route_segments(route_data)
-    consolidated = consolidate_road_segments(segments)
-
-    # Get weather checkpoints
-    checkpoints = get_weather_checkpoints(consolidated, total_distance_mi, interval)
+    checkpoints = get_weather_checkpoints(segments, total_distance_mi, interval)
 
     # Fetch weather for each checkpoint
     progress_console.print("[dim]Fetching weather data...[/dim]")
@@ -495,23 +410,9 @@ def route(
     # JSON output
     if as_json:
         data = {
-            "origin": {
-                "name": origin_geo.name,
-                "admin1": origin_geo.admin1,
-                "latitude": origin_geo.latitude,
-                "longitude": origin_geo.longitude,
-            },
-            "destination": {
-                "name": dest_geo.name,
-                "admin1": dest_geo.admin1,
-                "latitude": dest_geo.latitude,
-                "longitude": dest_geo.longitude,
-            },
-            "source": {
-                "provider": weather_provider.name,
-                "label": weather_provider.label,
-                "attribution": weather_provider.attribution,
-            },
+            "origin": location_payload(origin_geo),
+            "destination": location_payload(dest_geo),
+            "source": provider_source_payload(weather_provider),
             "route": {
                 "total_distance_mi": total_distance_mi,
                 "total_distance_km": total_distance_m / 1000,
@@ -528,7 +429,7 @@ def route(
                     "distance_mi": seg["distance_mi"],
                     "duration_formatted": format_duration(seg["duration_s"]),
                 }
-                for seg in consolidated
+                for seg in segments
             ],
             "weather_checkpoints": [
                 {
@@ -546,19 +447,17 @@ def route(
                 "wind_speed": settings.wind_speed_unit,
             },
         }
-        click.echo(json_lib.dumps(data, indent=2))
+        echo_json(data)
         return
 
     # === DISPLAY ===
     arrival = departure_time + total_duration
 
     console.print(f"\n[bold cyan]Route: {origin_geo.name} \u2192 {dest_geo.name}[/bold cyan]")
-    source_text = f" · Source: {weather_provider.model_label}"
-    if weather_provider.attribution:
-        source_text += f" · {weather_provider.attribution}"
     console.print(
         f"[dim]{total_distance_mi:.0f} miles · {format_duration(total_duration_s)} · "
-        f"Depart {format_time(departure_time)} → Arrive {format_time(arrival)}{source_text}[/dim]\n"
+        f"Depart {format_time(departure_time)} → Arrive {format_time(arrival)} · "
+        f"{format_weather_source(weather_provider)}[/dim]\n"
     )
 
     # Turn-by-turn directions (unless --brief)
@@ -571,7 +470,7 @@ def route(
         dir_table.add_column("Road", style="cyan")
         dir_table.add_column("Dist", style="dim", justify="right", width=8)
 
-        for seg in consolidated:
+        for seg in segments:
             if seg["distance_mi"] < 0.5 and seg["maneuver"] == "Continue":
                 continue  # Skip very short "continue" segments
 

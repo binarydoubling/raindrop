@@ -1,15 +1,15 @@
 """Measured station observation commands."""
 
-import json as json_lib
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
 import click
 from rich import box
-from rich.console import Console
 from rich.table import Table
 
 from raindrop.commands.common import (
+    console,
+    echo_json,
     format_location,
     geocode,
     location_payload,
@@ -28,8 +28,6 @@ from raindrop.providers.xweather import StationKindFilter, XweatherClient, Xweat
 from raindrop.settings import Settings, get_settings
 from raindrop.utils import TEMP_SYMBOLS, WIND_SYMBOLS, deg_to_compass
 
-console = Console()
-
 
 @click.group()
 def stations() -> None:
@@ -39,7 +37,6 @@ def stations() -> None:
 @stations.command("nearby")
 @click.argument("location", required=False)
 @click.option("-c", "--country", help="ISO 3166-1 alpha-2 country code (e.g., US, ES, DE)")
-@click.option("--provider", type=click.Choice(["xweather"]), default="xweather", show_default=True)
 @click.option(
     "--kind",
     type=click.Choice(["pws", "official", "all"]),
@@ -70,7 +67,6 @@ def stations() -> None:
 def nearby(
     location: str | None,
     country: str | None,
-    provider: str,
     kind: str,
     radius: float,
     radius_unit: str | None,
@@ -107,7 +103,7 @@ def nearby(
                 limit=limit,
                 kind=kind_filter,
             )
-            click.echo(json_lib.dumps(payload, indent=2))
+            echo_json(payload)
             return
 
         observations = client.nearby_observations(
@@ -136,27 +132,22 @@ def nearby(
     )
 
     if as_json:
-        click.echo(
-            json_lib.dumps(
-                {
-                    "provider": provider,
-                    "attribution": "Powered by Vaisala Xweather",
-                    "location": location_payload(result),
-                    "query": {
-                        "kind": kind,
-                        "radius_km": radius_km,
-                        "limit": limit,
-                        "max_age_minutes": max_age,
-                        "include_stale": include_stale,
-                        "sort": sort_name,
-                    },
-                    "units": "SI",
-                    "observations": [
-                        observation_to_dict(observation) for observation in observations
-                    ],
+        echo_json(
+            {
+                "provider": "xweather",
+                "attribution": "Powered by Vaisala Xweather",
+                "location": location_payload(result),
+                "query": {
+                    "kind": kind,
+                    "radius_km": radius_km,
+                    "limit": limit,
+                    "max_age_minutes": max_age,
+                    "include_stale": include_stale,
+                    "sort": sort_name,
                 },
-                indent=2,
-            )
+                "units": "SI",
+                "observations": [observation_to_dict(observation) for observation in observations],
+            }
         )
         return
 
@@ -174,7 +165,6 @@ def nearby(
 
 @stations.command("current")
 @click.argument("station_id")
-@click.option("--provider", type=click.Choice(["xweather"]), default="xweather", show_default=True)
 @click.option(
     "--max-age",
     type=click.IntRange(1, 1440),
@@ -187,7 +177,6 @@ def nearby(
 @click.option("--raw", is_flag=True, help="Output sanitized provider JSON")
 def current(
     station_id: str,
-    provider: str,
     max_age: int,
     include_stale: bool,
     as_json: bool,
@@ -202,7 +191,7 @@ def current(
     try:
         if raw:
             payload = client.current_raw(station_id)
-            click.echo(json_lib.dumps(payload, indent=2))
+            echo_json(payload)
             return
         observation = client.current_observation(station_id)
     except XweatherError as e:
@@ -222,16 +211,13 @@ def current(
         )
 
     if as_json:
-        click.echo(
-            json_lib.dumps(
-                {
-                    "provider": provider,
-                    "attribution": "Powered by Vaisala Xweather",
-                    "units": "SI",
-                    "observation": observation_to_dict(observation),
-                },
-                indent=2,
-            )
+        echo_json(
+            {
+                "provider": "xweather",
+                "attribution": "Powered by Vaisala Xweather",
+                "units": "SI",
+                "observation": observation_to_dict(observation),
+            }
         )
         return
 

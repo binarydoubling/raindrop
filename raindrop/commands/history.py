@@ -1,21 +1,24 @@
 """Historical weather comparison command."""
 
-import json as json_lib
-
 import click
 from rich import box
-from rich.console import Console
 from rich.table import Table
 
-from raindrop.commands.common import format_location, geocode, om, resolve_location_or_fail
+from raindrop.commands.common import (
+    console,
+    echo_json,
+    format_location,
+    geocode,
+    location_payload,
+    om,
+    resolve_location_or_fail,
+)
 from raindrop.settings import get_settings
 from raindrop.utils import (
     TEMP_SYMBOLS,
     WEATHER_LABELS,
     now_in_timezone,
 )
-
-console = Console()
 
 
 @click.command()
@@ -54,10 +57,7 @@ def history(location: str | None, country: str | None, years: int, as_json: bool
     current_weather = om.forecast(
         result.latitude,
         result.longitude,
-        current=[
-            "temperature_2m",
-            "weather_code",
-        ],
+        current=["temperature_2m"],
         daily=[
             "temperature_2m_max",
             "temperature_2m_min",
@@ -124,13 +124,7 @@ def history(location: str | None, country: str | None, years: int, as_json: bool
     # JSON output
     if as_json:
         data = {
-            "location": {
-                "name": result.name,
-                "admin1": result.admin1,
-                "country": result.country,
-                "latitude": result.latitude,
-                "longitude": result.longitude,
-            },
+            "location": location_payload(result),
             "today": current_data,
             "historical": historical_data,
             "units": {
@@ -138,7 +132,7 @@ def history(location: str | None, country: str | None, years: int, as_json: bool
                 "precipitation": settings.precipitation_unit,
             },
         }
-        click.echo(json_lib.dumps(data, indent=2))
+        echo_json(data)
         return
 
     # Display

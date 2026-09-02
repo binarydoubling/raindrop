@@ -32,9 +32,9 @@ def sparkline(values: Sequence[float | int | None]) -> str:
     return "".join(result)
 
 
-def format_duration(td: timedelta) -> str:
-    """Format a timedelta as human readable."""
-    total_seconds = int(td.total_seconds())
+def format_duration(duration: timedelta | float | int) -> str:
+    """Format a timedelta or number of seconds as human readable."""
+    total_seconds = int(duration.total_seconds() if isinstance(duration, timedelta) else duration)
     hours, remainder = divmod(total_seconds, 3600)
     minutes, _ = divmod(remainder, 60)
     if hours > 0:

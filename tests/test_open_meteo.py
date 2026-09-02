@@ -53,3 +53,50 @@ def test_geocode_raises_on_unmatched_qualifier(monkeypatch: pytest.MonkeyPatch) 
 
     with pytest.raises(OpenMeteoError):
         client.geocode("Paris, TX")
+
+
+def test_forecast_maps_known_fields_and_ignores_unknown_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = OpenMeteo()
+    monkeypatch.setattr(
+        client,
+        "_request",
+        lambda url, ttl=None: {
+            "latitude": 1.0,
+            "longitude": 2.0,
+            "elevation": 3.0,
+            "timezone": "UTC",
+            "timezone_abbreviation": "UTC",
+            "utc_offset_seconds": 0,
+            "current": {
+                "time": "2026-01-01T00:00",
+                "interval": 900,
+                "temperature_2m": 4.0,
+                "is_day": 0,
+                "future_api_field": "ignored",
+            },
+        },
+    )
+
+    result = client.forecast(1.0, 2.0, current=["temperature_2m", "is_day"])
+
+    assert result.current is not None
+    assert result.current.temperature_2m == 4.0
+    assert result.current.is_day is False
+
+
+def test_marine_uses_shared_transport(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = OpenMeteo()
+    requested: list[tuple[str, int | None]] = []
+
+    def fake_request(url: str, ttl: int | None = None) -> dict:
+        requested.append((url, ttl))
+        return {"hourly": {}}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+
+    assert client.marine(1.0, 2.0) == {"hourly": {}}
+    assert requested[0][0].startswith("https://marine-api.open-meteo.com/v1/marine?")
+    assert "wave_height" in requested[0][0]
+    assert requested[0][1] == 600

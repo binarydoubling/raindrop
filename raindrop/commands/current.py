@@ -1,17 +1,18 @@
 """Current weather command."""
 
-import json as json_lib
 from datetime import datetime
 
 import click
 from rich import box
-from rich.console import Console
 from rich.table import Table
 
 from raindrop.commands.common import (
+    console,
+    echo_json,
     format_location,
     format_weather_source,
     geocode,
+    location_payload,
     resolve_location_or_fail,
     resolve_weather_provider_or_fail,
 )
@@ -26,8 +27,7 @@ from raindrop.utils import (
     format_uv,
     format_visibility,
 )
-
-console = Console()
+from raindrop.weather_provider import provider_source_payload
 
 
 @click.command()
@@ -99,21 +99,11 @@ def current(
     # JSON output
     if as_json:
         data = {
-            "location": {
-                "name": result.name,
-                "admin1": result.admin1,
-                "country": result.country,
-                "latitude": result.latitude,
-                "longitude": result.longitude,
-            },
+            "location": location_payload(result),
             "elevation": weather.elevation,
             "timezone": weather.timezone,
             "model": weather_provider.model_label,
-            "source": {
-                "provider": weather_provider.name,
-                "label": weather_provider.label,
-                "attribution": weather_provider.attribution,
-            },
+            "source": provider_source_payload(weather_provider),
             "current": {
                 "time": c.time,
                 "temperature": c.temperature_2m,
@@ -143,7 +133,7 @@ def current(
                 "precipitation": settings.precipitation_unit,
             },
         }
-        click.echo(json_lib.dumps(data, indent=2))
+        echo_json(data)
         return
 
     # Compact one-liner output

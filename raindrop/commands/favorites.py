@@ -2,13 +2,10 @@
 
 import click
 from rich import box
-from rich.console import Console
 from rich.table import Table
 
-from raindrop.commands.common import format_location, geocode
+from raindrop.commands.common import console, format_location, geocode
 from raindrop.settings import Favorite, get_settings
-
-console = Console()
 
 
 @click.group()

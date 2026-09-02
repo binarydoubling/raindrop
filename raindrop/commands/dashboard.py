@@ -5,7 +5,7 @@ from datetime import datetime
 
 import click
 from rich import box
-from rich.console import Console, Group
+from rich.console import Group
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
@@ -13,6 +13,7 @@ from rich.table import Table
 from rich.text import Text
 
 from raindrop.commands.common import (
+    console,
     format_location,
     geocode,
     resolve_location_or_fail,
@@ -35,8 +36,6 @@ from raindrop.utils.astro import (
     moon_illumination,
     moon_phase,
 )
-
-console = Console()
 
 
 def make_layout() -> Layout:
@@ -101,10 +100,6 @@ def render_current(weather, settings) -> Panel:
     table.add_column()
     table.add_column()
 
-    # Big temperature
-    temp_text = Text(f"{c.temperature_2m:.0f}\u00b0{temp_symbol}", style="bold white")
-    temp_text.stylize("bold", 0, len(temp_text))
-
     table.add_row(
         Text.from_markup(f"[bold white on {color}] {label.upper()} [/bold white on {color}]"),
         "",
@@ -143,7 +138,7 @@ def render_current(weather, settings) -> Panel:
     return Panel(content, title="[bold]Current Conditions[/bold]", border_style="green")
 
 
-def render_hourly(weather, settings) -> Panel:
+def render_hourly(weather) -> Panel:
     """Render hourly forecast panel with sparklines."""
     h = weather.hourly
     if h is None:
@@ -188,7 +183,7 @@ def render_hourly(weather, settings) -> Panel:
     return Panel(content, title="[bold]Next 24 Hours[/bold]", border_style="cyan")
 
 
-def render_daily(weather, settings) -> Panel:
+def render_daily(weather) -> Panel:
     """Render daily forecast panel."""
     d = weather.daily
     if d is None:
@@ -303,7 +298,6 @@ def fetch_weather_data(geo, settings):
             "temperature_2m",
             "precipitation_probability",
             "wind_speed_10m",
-            "weather_code",
         ],
         daily=[
             "weather_code",
@@ -366,8 +360,8 @@ def dashboard(location: str | None, country: str | None, refresh: int):
 
         layout["header"].update(render_header(location_name, weather.timezone))
         layout["current"].update(render_current(weather, settings))
-        layout["hourly"].update(render_hourly(weather, settings))
-        layout["daily"].update(render_daily(weather, settings))
+        layout["hourly"].update(render_hourly(weather))
+        layout["daily"].update(render_daily(weather))
         layout["astro"].update(render_astro(weather))
         layout["footer"].update(render_footer(refresh, weather.attribution))
 

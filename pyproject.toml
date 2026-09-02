@@ -33,7 +33,6 @@ Issues = "https://github.com/binarydoubling/raindrop/issues"
 
 [project.scripts]
 raindrop = "raindrop.cli:main"
-rdrop = "raindrop.cli:main"
 
 [build-system]
 requires = ["hatchling"]

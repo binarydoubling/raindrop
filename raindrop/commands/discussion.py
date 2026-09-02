@@ -1,17 +1,21 @@
 """NWS forecast discussion command."""
 
-import json as json_lib
 import re
 from datetime import datetime as dt
 
 import click
-from rich.console import Console
 
-from raindrop.commands.common import format_location, geocode, nws, resolve_location_or_fail
+from raindrop.commands.common import (
+    console,
+    echo_json,
+    format_location,
+    geocode,
+    location_payload,
+    nws,
+    resolve_location_or_fail,
+)
 from raindrop.settings import get_settings
 from raindrop.utils import format_time
-
-console = Console()
 
 
 def format_discussion(text: str) -> str:
@@ -109,13 +113,7 @@ def discussion(location: str | None, country: str | None, raw: bool, as_json: bo
     # JSON output
     if as_json:
         data = {
-            "location": {
-                "name": result.name,
-                "admin1": result.admin1,
-                "country": result.country,
-                "latitude": result.latitude,
-                "longitude": result.longitude,
-            },
+            "location": location_payload(result),
             "office": {
                 "id": office.id,
                 "name": office.name,
@@ -126,7 +124,7 @@ def discussion(location: str | None, country: str | None, raw: bool, as_json: bo
                 "text": disc.product_text,
             },
         }
-        click.echo(json_lib.dumps(data, indent=2))
+        echo_json(data)
         return
 
     # Header

@@ -1,23 +1,23 @@
 """Astronomical data command (sun, moon, golden hour)."""
 
-import json as json_lib
 from datetime import datetime
 
 import click
 from rich import box
-from rich.console import Console
 from rich.table import Table
 
 from raindrop.commands.common import (
+    console,
+    echo_json,
     format_location,
     format_weather_source,
     geocode,
+    location_payload,
     resolve_location_or_fail,
     resolve_weather_provider_or_fail,
 )
 from raindrop.settings import get_settings
-from raindrop.utils import format_time as format_clock_time
-from raindrop.utils import now_in_timezone
+from raindrop.utils import format_time, now_in_timezone
 from raindrop.utils.astro import (
     blue_hour,
     daylight_duration,
@@ -28,13 +28,7 @@ from raindrop.utils.astro import (
     next_moon_phase,
     solar_noon,
 )
-
-console = Console()
-
-
-def format_time(dt: datetime) -> str:
-    """Format datetime as time string."""
-    return format_clock_time(dt)
+from raindrop.weather_provider import provider_source_payload
 
 
 def format_time_until(now: datetime, target: datetime) -> str:
@@ -73,13 +67,7 @@ def astro(location: str | None, country: str | None, as_json: bool):
     weather = weather_provider.forecast(
         result.latitude,
         result.longitude,
-        daily=[
-            "sunrise",
-            "sunset",
-            "daylight_duration",
-            "sunshine_duration",
-            "uv_index_max",
-        ],
+        daily=["sunrise", "sunset"],
         forecast_days=7,
     )
 
@@ -113,19 +101,9 @@ def astro(location: str | None, country: str | None, as_json: bool):
     # JSON output
     if as_json:
         data = {
-            "location": {
-                "name": result.name,
-                "admin1": result.admin1,
-                "country": result.country,
-                "latitude": result.latitude,
-                "longitude": result.longitude,
-            },
+            "location": location_payload(result),
             "date": today.isoformat(),
-            "source": {
-                "provider": weather_provider.name,
-                "label": weather_provider.label,
-                "attribution": weather_provider.attribution,
-            },
+            "source": provider_source_payload(weather_provider),
             "sun": {
                 "sunrise": d.sunrise[0],
                 "sunset": d.sunset[0],
@@ -172,7 +150,7 @@ def astro(location: str | None, country: str | None, as_json: bool):
                 for i in range(min(7, len(d.time)))
             ],
         }
-        click.echo(json_lib.dumps(data, indent=2))
+        echo_json(data)
         return
 
     # Display

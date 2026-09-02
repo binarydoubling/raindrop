@@ -2,61 +2,50 @@
 
 ## Project Overview
 
-Raindrop (`rdrop`) is a Python 3.12+ CLI weather tool built with Click and Rich.
-It has only **2 runtime dependencies** (click, rich) and uses `urllib` for HTTP.
-Entry point: `raindrop.cli:main`. Package manager: `uv`. Build backend: Hatchling.
+Raindrop is a Python 3.12+ weather CLI built with Click and Rich. It uses
+`urllib` for HTTP and has only two runtime dependencies. The package distribution
+is `rdrop`; the command entry point is `raindrop.cli:main`. Package manager: `uv`.
+Build backend: Hatchling.
 
 ## Project Layout
 
 ```
-raindrop/              # Main package
-  cli.py               # Click group, command registration
-  __init__.py           # __version__
-  commands/             # 17 CLI subcommand modules (current.py, hourly.py, etc.)
-  utils/                # Shared utilities (formatting.py, weather.py, astro.py)
-open_meteo.py          # API client (Open-Meteo, NWS) — lives at project root
-settings.py            # Persistent settings/config — lives at project root
-scripts/capture.py     # Screenshot capture for README SVGs
-pyproject.toml         # Project metadata, deps, build config
+raindrop/
+  cli.py               # Click group and command registration
+  open_meteo.py        # Open-Meteo and NWS clients and response models
+  settings.py          # Persistent configuration
+  weather_provider.py  # Forecast provider selection and normalization
+  commands/            # CLI command modules and shared command helpers
+  providers/           # Credentialed provider clients
+  utils/               # Formatting, weather, and astronomy helpers
+scripts/capture.py     # README screenshot capture
+pyproject.toml         # Project metadata and tooling
 ```
-
-Note: `open_meteo.py` and `settings.py` live at the project root (outside the
-`raindrop/` package) and are force-included in the wheel via Hatch config.
 
 ## Build / Install / Run
 
 ```bash
-uv sync                          # Install deps (creates .venv)
-uv run raindrop current Seattle  # Run via uv
-pip install -e ".[dev]"          # Editable install with dev deps
-raindrop current Seattle         # Run after install
-uv build                         # Build wheel + sdist into dist/
+uv sync
+uv run raindrop current Seattle
+pip install -e ".[dev]"
+uv build
 ```
 
-## Type Checking
+## Checks
 
 ```bash
-uv run pyright                   # Run Pyright (only configured dev tool)
-pyright                          # If installed globally
-pyright raindrop/commands/current.py  # Check a single file
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv run pytest
 ```
 
-## Linting / Formatting
-
-No linter or formatter is configured in pyproject.toml. A `.ruff_cache/` exists,
-suggesting Ruff has been used. If adding tooling, prefer Ruff for both linting
-and formatting as it aligns with the existing style.
-
-## Testing
-
-**No tests exist yet.** The README mentions pytest for contributing.
-If/when tests are added:
+Run a focused test with:
 
 ```bash
-uv run pytest                              # Run all tests
-uv run pytest tests/test_cache.py          # Single test file
-uv run pytest tests/test_cache.py::test_x  # Single test function
-uv run pytest -k "test_geocode"            # Tests matching pattern
+uv run pytest tests/test_cache.py
+uv run pytest tests/test_cache.py::test_name
+uv run pytest -k "geocode"
 ```
 
 ## Code Style
@@ -65,136 +54,75 @@ uv run pytest -k "test_geocode"            # Tests matching pattern
 
 Order imports in three groups separated by blank lines:
 
-1. Standard library (`datetime`, `json`, `math`, `pathlib`, etc.)
+1. Standard library
 2. Third-party (`click`, `rich.*`)
-3. Local (`open_meteo`, `settings`, `raindrop.*`)
+3. Local (`raindrop.*`)
 
-```python
-"""Module docstring."""
+Use absolute imports except for deliberate package re-exports. Ruff owns import
+sorting and formatting.
 
-from datetime import datetime
-import json as json_lib
+### Naming
 
-import click
-from rich.console import Console
-from rich.table import Table
-from rich import box
+| Element | Convention | Example |
+|---------|------------|---------|
+| Files/functions/variables | `snake_case` | `open_meteo.py`, `get_cache()` |
+| Constants | `UPPER_SNAKE_CASE` | `WEATHER_CODES` |
+| Classes/types | `PascalCase` | `OpenMeteo`, `TemperatureUnit` |
+| CLI commands | function name | `def current(...)` |
 
-from open_meteo import OpenMeteo
-from settings import get_settings, AVAILABLE_MODELS
-from raindrop.utils import WEATHER_CODES, sparkline
-```
+### Types and Formatting
 
-- Use **absolute imports** everywhere except in `__init__.py` files, which use
-  relative imports to re-export submodules (e.g., `from .formatting import sparkline`).
-- No path aliases are configured.
+- Annotate every function signature.
+- Use `X | None` and built-in generics such as `list[str]`.
+- Use `Literal` for constrained strings.
+- Use double-quoted strings and f-strings.
+- Leave two blank lines between top-level definitions.
+- Use Rich markup for styled human output.
 
-### Naming Conventions
+### Command Modules
 
-| Element     | Convention         | Examples                                    |
-|-------------|--------------------|---------------------------------------------|
-| Files       | `snake_case.py`    | `open_meteo.py`, `formatting.py`            |
-| Directories | lowercase          | `commands/`, `utils/`                        |
-| Functions   | `snake_case`       | `get_cache()`, `deg_to_compass()`            |
-| Variables   | `snake_case`       | `temp_symbol`, `total_distance_mi`           |
-| Constants   | `UPPER_SNAKE_CASE` | `WEATHER_CODES`, `CACHE_DIR`, `DEFAULT_TTL`  |
-| Classes     | `PascalCase`       | `OpenMeteo`, `GeocodingResult`, `Settings`   |
-| Type aliases| `PascalCase`       | `TemperatureUnit`, `WindSpeedUnit`           |
-| CLI commands| match function name| `def current(...)`, `def hourly(...)`        |
+Command modules reuse `console`, `geocode`, `echo_json`, location resolution,
+and payload helpers from `raindrop.commands.common`. Each Click command generally:
 
-Short abbreviations are used for common local variables:
-`c` (current), `d` (daily), `h` (hourly), `om` (OpenMeteo), `nws` (NWSClient).
+1. loads settings;
+2. resolves a location;
+3. fetches provider-neutral data where applicable;
+4. emits JSON with `echo_json` or renders Rich output.
 
-### Type Annotations
-
-- **All function signatures must have type annotations.**
-- Use modern union syntax: `str | None`, `float | int | None` (not `Optional`).
-- Use lowercase generics: `list[str]`, `dict[str, str]`, `tuple[str, str]`.
-- Use `Literal` for constrained string types.
-- Dataclass fields use `float | None = None` for optional API response fields.
-
-### Formatting
-
-- f-strings exclusively — never `.format()` or `%` formatting.
-- 2 blank lines between top-level definitions.
-- 1 blank line between methods inside a class.
-- Rich console markup for colored output: `"[bold cyan]text[/bold cyan]"`.
-- Strings use double quotes.
-
-### Module Structure
-
-Every command module follows this pattern:
-
-```python
-"""Command docstring."""
-
-# 1. Standard library imports
-# 2. Third-party imports (click, rich)
-# 3. Local imports (open_meteo, settings, raindrop.utils)
-
-om = OpenMeteo()           # Module-level singleton
-console = Console()        # Module-level singleton
-
-def geocode(location: str, country: str | None = None):
-    """Geocode helper (duplicated per command module)."""
-    results = om.geocode(location, country_code=country)
-    return results[0]
-
-@click.command()
-@click.argument("location", required=False)
-@click.option("-c", "--country", help="...")
-@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
-def command_name(location: str | None, country: str | None, as_json: bool):
-    """Help text shown in CLI."""
-    settings = get_settings()
-    # Resolve location, fetch data, render output
-```
+Register new commands directly in `raindrop/cli.py`.
 
 ### Error Handling
 
-- **User-facing errors**: Raise `click.ClickException(message)` — Click handles
-  display and exit code.
-- **API errors**: Caught in `open_meteo.py` and re-raised as `OpenMeteoError`.
-  The `_request()` methods catch `HTTPError`, `URLError`, `TimeoutError`, and
-  `JSONDecodeError`, wrapping them in `OpenMeteoError`.
-- **Non-critical failures**: Use `except OSError: pass` (e.g., cache writes).
-- **Missing data guards**: Use `or []` defaults and bounds checking:
-  ```python
-  temps = h.temperature_2m or []
-  temp = temps[i] if i < len(temps) else 0
-  ```
-- **Location resolution**: Wrap in try/except ValueError, raise ClickException.
+- Raise `click.ClickException` for user-facing errors.
+- API clients wrap transport/JSON failures in `OpenMeteoError` or their provider error.
+- Ignore only explicitly non-critical filesystem failures.
+- Guard optional API arrays with `or []` and bounds checks.
 
-### Data Modeling
+### Data Models
 
-- Use `@dataclass` for all data models (API responses, settings, etc.).
-- All API response dataclass fields should be `type | None = None` for optional
-  data that may not be returned by every endpoint.
+Use `@dataclass` for API and settings models. API fields that may be omitted use
+`type | None = None`. Keep forecast commands provider-neutral; do not blend model
+forecasts with measured station observations without explicit provenance.
 
-### Docstrings
+### Documentation
 
-- Every file has a module-level docstring: `"""Current weather command."""`
-- Every class has a docstring.
-- API client methods use `Args/Returns` format.
-- Click command docstrings double as CLI help text.
+Every Python file has a module docstring. Classes and public helpers have concise
+docstrings. Click command docstrings are user-facing help.
 
-## Key Architecture Notes
+## Architecture Notes
 
-- Only 2 runtime deps: `click>=8.3.1`, `rich>=14.2.0`.
-- HTTP via `urllib.request` — no requests/httpx.
-- Pure-Python astronomy (no astropy): `raindrop/utils/astro.py`.
-- File-based cache with SHA256 keys: `raindrop/cache.py`.
-- External APIs: Open-Meteo (weather/geocoding), OSRM (routes), NWS (alerts/discussions).
-- The `geocode()` helper is duplicated in every command module rather than shared.
-- `--json` flag on every command outputs `json.dumps(data, indent=2)`.
-- `--country` / `-c` flag on every command for country filtering.
+- Runtime dependencies: Click and Rich only.
+- HTTP: `urllib.request`; no requests/httpx.
+- Astronomy: pure Python.
+- Cache: JSON files with SHA256-derived keys.
+- APIs: Open-Meteo, OSRM, NWS, and optional credentialed Xweather.
+- `--json` command output uses the shared indented serializer.
+- Xweather credentials must never be printed, serialized into output, or included in cache keys.
+- `--model` selects Open-Meteo; provider `auto` otherwise prefers configured Xweather.
 
 ## Common Pitfalls
 
-- `open_meteo.py` and `settings.py` are at the project root, not inside `raindrop/`.
-  Import them as `from open_meteo import OpenMeteo`, not `from raindrop.open_meteo`.
-- When adding a new command, register it in both `raindrop/commands/__init__.py`
-  (re-export) and `raindrop/cli.py` (`cli.add_command(new_cmd)`).
-- The project targets Python 3.12+ — use modern syntax (`X | Y`, `list[T]`).
-- No test suite exists yet. If writing tests, use pytest and consider mocking
-  API calls since all commands hit external APIs.
+- Import API/config modules as `raindrop.open_meteo` and `raindrop.settings`.
+- Register commands directly in `raindrop/cli.py`; `raindrop.commands` is not a barrel.
+- The project targets Python 3.12+.
+- Mock external APIs in ordinary tests; use documented CLI commands for manual live probes.

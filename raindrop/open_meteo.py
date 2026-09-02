@@ -4,7 +4,7 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any, Literal, cast
 
 from raindrop.cache import cached_request
@@ -13,6 +13,7 @@ FORECAST_BASE_URL = "https://api.open-meteo.com/v1"
 GEOCODING_BASE_URL = "https://geocoding-api.open-meteo.com/v1"
 AIR_QUALITY_BASE_URL = "https://air-quality-api.open-meteo.com/v1"
 HISTORICAL_BASE_URL = "https://archive-api.open-meteo.com/v1"
+MARINE_BASE_URL = "https://marine-api.open-meteo.com/v1"
 NWS_API_BASE_URL = "https://api.weather.gov"
 
 # US state abbreviations -> full names for "City, ST" parsing
@@ -75,9 +76,6 @@ US_STATES: dict[str, str] = {
     "MP": "Northern Mariana Islands",
 }
 
-# Reverse lookup: full state name (lowercase) -> abbreviation
-_US_STATES_REVERSE: dict[str, str] = {v.lower(): k for k, v in US_STATES.items()}
-
 
 def _parse_location(name: str) -> tuple[str, str | None]:
     """Parse a location string that may contain a comma-separated qualifier.
@@ -118,6 +116,12 @@ class OpenMeteoError(Exception):
     pass
 
 
+def _from_payload[T](cls: type[T], payload: dict[str, Any]) -> T:
+    """Construct a dataclass from matching response fields."""
+    names = {field.name for field in fields(cast(Any, cls))}
+    return cls(**{name: payload[name] for name in names if name in payload})
+
+
 # =============================================================================
 # Geocoding Types
 # =============================================================================
@@ -156,114 +160,7 @@ class GeocodingResult:
 TemperatureUnit = Literal["celsius", "fahrenheit"]
 WindSpeedUnit = Literal["kmh", "ms", "mph", "kn"]
 PrecipitationUnit = Literal["mm", "inch"]
-TimeFormat = Literal["iso8601", "unixtime"]
 CellSelection = Literal["land", "sea", "nearest"]
-
-# Current weather variables
-CurrentVariable = Literal[
-    "temperature_2m",
-    "relative_humidity_2m",
-    "dew_point_2m",
-    "apparent_temperature",
-    "is_day",
-    "precipitation",
-    "rain",
-    "showers",
-    "snowfall",
-    "weather_code",
-    "cloud_cover",
-    "pressure_msl",
-    "surface_pressure",
-    "wind_speed_10m",
-    "wind_direction_10m",
-    "wind_gusts_10m",
-    "visibility",
-    "uv_index",
-]
-
-# Hourly weather variables (subset of most common ones)
-HourlyVariable = Literal[
-    "temperature_2m",
-    "relative_humidity_2m",
-    "dew_point_2m",
-    "apparent_temperature",
-    "pressure_msl",
-    "surface_pressure",
-    "cloud_cover",
-    "cloud_cover_low",
-    "cloud_cover_mid",
-    "cloud_cover_high",
-    "wind_speed_10m",
-    "wind_speed_80m",
-    "wind_speed_120m",
-    "wind_speed_180m",
-    "wind_direction_10m",
-    "wind_direction_80m",
-    "wind_direction_120m",
-    "wind_direction_180m",
-    "wind_gusts_10m",
-    "shortwave_radiation",
-    "direct_radiation",
-    "direct_normal_irradiance",
-    "diffuse_radiation",
-    "global_tilted_irradiance",
-    "vapour_pressure_deficit",
-    "cape",
-    "evapotranspiration",
-    "et0_fao_evapotranspiration",
-    "precipitation",
-    "snowfall",
-    "precipitation_probability",
-    "rain",
-    "showers",
-    "weather_code",
-    "snow_depth",
-    "freezing_level_height",
-    "visibility",
-    "soil_temperature_0cm",
-    "soil_temperature_6cm",
-    "soil_temperature_18cm",
-    "soil_temperature_54cm",
-    "soil_moisture_0_to_1cm",
-    "soil_moisture_1_to_3cm",
-    "soil_moisture_3_to_9cm",
-    "soil_moisture_9_to_27cm",
-    "soil_moisture_27_to_81cm",
-    "is_day",
-    "sunshine_duration",
-    "uv_index",
-    "uv_index_clear_sky",
-]
-
-# Daily weather variables
-DailyVariable = Literal[
-    "weather_code",
-    "temperature_2m_max",
-    "temperature_2m_min",
-    "temperature_2m_mean",
-    "apparent_temperature_max",
-    "apparent_temperature_min",
-    "apparent_temperature_mean",
-    "sunrise",
-    "sunset",
-    "daylight_duration",
-    "sunshine_duration",
-    "uv_index_max",
-    "uv_index_clear_sky_max",
-    "precipitation_sum",
-    "rain_sum",
-    "showers_sum",
-    "snowfall_sum",
-    "precipitation_hours",
-    "precipitation_probability_max",
-    "precipitation_probability_min",
-    "precipitation_probability_mean",
-    "wind_speed_10m_max",
-    "wind_gusts_10m_max",
-    "wind_direction_10m_dominant",
-    "shortwave_radiation_sum",
-    "et0_fao_evapotranspiration",
-]
 
 
 @dataclass
@@ -478,6 +375,10 @@ class AirQualityResult:
 class OpenMeteo:
     """Client for the Open-Meteo weather API."""
 
+    name: Literal["open-meteo"] = "open-meteo"
+    label = "Open-Meteo"
+    attribution: str | None = None
+
     def __init__(
         self,
         forecast_base_url: str = FORECAST_BASE_URL,
@@ -688,124 +589,15 @@ class OpenMeteo:
 
         data = self._request(url, ttl=300)
 
-        # Parse current weather
         current_weather = None
         if "current" in data:
-            c = data["current"]
-            current_weather = CurrentWeather(
-                time=c["time"],
-                interval=c["interval"],
-                temperature_2m=c.get("temperature_2m"),
-                relative_humidity_2m=c.get("relative_humidity_2m"),
-                apparent_temperature=c.get("apparent_temperature"),
-                dew_point_2m=c.get("dew_point_2m"),
-                is_day=bool(c["is_day"]) if "is_day" in c else None,
-                precipitation=c.get("precipitation"),
-                rain=c.get("rain"),
-                showers=c.get("showers"),
-                snowfall=c.get("snowfall"),
-                weather_code=c.get("weather_code"),
-                cloud_cover=c.get("cloud_cover"),
-                pressure_msl=c.get("pressure_msl"),
-                surface_pressure=c.get("surface_pressure"),
-                wind_speed_10m=c.get("wind_speed_10m"),
-                wind_direction_10m=c.get("wind_direction_10m"),
-                wind_gusts_10m=c.get("wind_gusts_10m"),
-                visibility=c.get("visibility"),
-                uv_index=c.get("uv_index"),
-            )
+            current_data = dict(data["current"])
+            if "is_day" in current_data:
+                current_data["is_day"] = bool(current_data["is_day"])
+            current_weather = _from_payload(CurrentWeather, current_data)
 
-        # Parse hourly forecast
-        hourly_weather = None
-        if "hourly" in data:
-            h = data["hourly"]
-            hourly_weather = HourlyWeather(
-                time=h["time"],
-                temperature_2m=h.get("temperature_2m"),
-                relative_humidity_2m=h.get("relative_humidity_2m"),
-                dew_point_2m=h.get("dew_point_2m"),
-                apparent_temperature=h.get("apparent_temperature"),
-                pressure_msl=h.get("pressure_msl"),
-                surface_pressure=h.get("surface_pressure"),
-                cloud_cover=h.get("cloud_cover"),
-                cloud_cover_low=h.get("cloud_cover_low"),
-                cloud_cover_mid=h.get("cloud_cover_mid"),
-                cloud_cover_high=h.get("cloud_cover_high"),
-                wind_speed_10m=h.get("wind_speed_10m"),
-                wind_speed_80m=h.get("wind_speed_80m"),
-                wind_speed_120m=h.get("wind_speed_120m"),
-                wind_speed_180m=h.get("wind_speed_180m"),
-                wind_direction_10m=h.get("wind_direction_10m"),
-                wind_direction_80m=h.get("wind_direction_80m"),
-                wind_direction_120m=h.get("wind_direction_120m"),
-                wind_direction_180m=h.get("wind_direction_180m"),
-                wind_gusts_10m=h.get("wind_gusts_10m"),
-                shortwave_radiation=h.get("shortwave_radiation"),
-                direct_radiation=h.get("direct_radiation"),
-                direct_normal_irradiance=h.get("direct_normal_irradiance"),
-                diffuse_radiation=h.get("diffuse_radiation"),
-                global_tilted_irradiance=h.get("global_tilted_irradiance"),
-                vapour_pressure_deficit=h.get("vapour_pressure_deficit"),
-                cape=h.get("cape"),
-                evapotranspiration=h.get("evapotranspiration"),
-                et0_fao_evapotranspiration=h.get("et0_fao_evapotranspiration"),
-                precipitation=h.get("precipitation"),
-                snowfall=h.get("snowfall"),
-                precipitation_probability=h.get("precipitation_probability"),
-                rain=h.get("rain"),
-                showers=h.get("showers"),
-                weather_code=h.get("weather_code"),
-                snow_depth=h.get("snow_depth"),
-                freezing_level_height=h.get("freezing_level_height"),
-                visibility=h.get("visibility"),
-                soil_temperature_0cm=h.get("soil_temperature_0cm"),
-                soil_temperature_6cm=h.get("soil_temperature_6cm"),
-                soil_temperature_18cm=h.get("soil_temperature_18cm"),
-                soil_temperature_54cm=h.get("soil_temperature_54cm"),
-                soil_moisture_0_to_1cm=h.get("soil_moisture_0_to_1cm"),
-                soil_moisture_1_to_3cm=h.get("soil_moisture_1_to_3cm"),
-                soil_moisture_3_to_9cm=h.get("soil_moisture_3_to_9cm"),
-                soil_moisture_9_to_27cm=h.get("soil_moisture_9_to_27cm"),
-                soil_moisture_27_to_81cm=h.get("soil_moisture_27_to_81cm"),
-                is_day=h.get("is_day"),
-                sunshine_duration=h.get("sunshine_duration"),
-                uv_index=h.get("uv_index"),
-                uv_index_clear_sky=h.get("uv_index_clear_sky"),
-            )
-
-        # Parse daily forecast
-        daily_weather = None
-        if "daily" in data:
-            d = data["daily"]
-            daily_weather = DailyWeather(
-                time=d["time"],
-                weather_code=d.get("weather_code"),
-                temperature_2m_max=d.get("temperature_2m_max"),
-                temperature_2m_min=d.get("temperature_2m_min"),
-                temperature_2m_mean=d.get("temperature_2m_mean"),
-                apparent_temperature_max=d.get("apparent_temperature_max"),
-                apparent_temperature_min=d.get("apparent_temperature_min"),
-                apparent_temperature_mean=d.get("apparent_temperature_mean"),
-                sunrise=d.get("sunrise"),
-                sunset=d.get("sunset"),
-                daylight_duration=d.get("daylight_duration"),
-                sunshine_duration=d.get("sunshine_duration"),
-                uv_index_max=d.get("uv_index_max"),
-                uv_index_clear_sky_max=d.get("uv_index_clear_sky_max"),
-                precipitation_sum=d.get("precipitation_sum"),
-                rain_sum=d.get("rain_sum"),
-                showers_sum=d.get("showers_sum"),
-                snowfall_sum=d.get("snowfall_sum"),
-                precipitation_hours=d.get("precipitation_hours"),
-                precipitation_probability_max=d.get("precipitation_probability_max"),
-                precipitation_probability_min=d.get("precipitation_probability_min"),
-                precipitation_probability_mean=d.get("precipitation_probability_mean"),
-                wind_speed_10m_max=d.get("wind_speed_10m_max"),
-                wind_gusts_10m_max=d.get("wind_gusts_10m_max"),
-                wind_direction_10m_dominant=d.get("wind_direction_10m_dominant"),
-                shortwave_radiation_sum=d.get("shortwave_radiation_sum"),
-                et0_fao_evapotranspiration=d.get("et0_fao_evapotranspiration"),
-            )
+        hourly_weather = _from_payload(HourlyWeather, data["hourly"]) if "hourly" in data else None
+        daily_weather = _from_payload(DailyWeather, data["daily"]) if "daily" in data else None
 
         return ForecastResult(
             latitude=data["latitude"],
@@ -866,58 +658,10 @@ class OpenMeteo:
 
         data = self._request(url, ttl=600)
 
-        # Parse current air quality
-        current_aq = None
-        if "current" in data:
-            c = data["current"]
-            current_aq = CurrentAirQuality(
-                time=c["time"],
-                interval=c["interval"],
-                us_aqi=c.get("us_aqi"),
-                european_aqi=c.get("european_aqi"),
-                pm10=c.get("pm10"),
-                pm2_5=c.get("pm2_5"),
-                carbon_monoxide=c.get("carbon_monoxide"),
-                nitrogen_dioxide=c.get("nitrogen_dioxide"),
-                sulphur_dioxide=c.get("sulphur_dioxide"),
-                ozone=c.get("ozone"),
-                dust=c.get("dust"),
-                uv_index=c.get("uv_index"),
-                uv_index_clear_sky=c.get("uv_index_clear_sky"),
-                ammonia=c.get("ammonia"),
-                alder_pollen=c.get("alder_pollen"),
-                birch_pollen=c.get("birch_pollen"),
-                grass_pollen=c.get("grass_pollen"),
-                mugwort_pollen=c.get("mugwort_pollen"),
-                olive_pollen=c.get("olive_pollen"),
-                ragweed_pollen=c.get("ragweed_pollen"),
-            )
-
-        # Parse hourly air quality
-        hourly_aq = None
-        if "hourly" in data:
-            h = data["hourly"]
-            hourly_aq = HourlyAirQuality(
-                time=h["time"],
-                us_aqi=h.get("us_aqi"),
-                european_aqi=h.get("european_aqi"),
-                pm10=h.get("pm10"),
-                pm2_5=h.get("pm2_5"),
-                carbon_monoxide=h.get("carbon_monoxide"),
-                nitrogen_dioxide=h.get("nitrogen_dioxide"),
-                sulphur_dioxide=h.get("sulphur_dioxide"),
-                ozone=h.get("ozone"),
-                dust=h.get("dust"),
-                uv_index=h.get("uv_index"),
-                uv_index_clear_sky=h.get("uv_index_clear_sky"),
-                ammonia=h.get("ammonia"),
-                alder_pollen=h.get("alder_pollen"),
-                birch_pollen=h.get("birch_pollen"),
-                grass_pollen=h.get("grass_pollen"),
-                mugwort_pollen=h.get("mugwort_pollen"),
-                olive_pollen=h.get("olive_pollen"),
-                ragweed_pollen=h.get("ragweed_pollen"),
-            )
+        current_aq = (
+            _from_payload(CurrentAirQuality, data["current"]) if "current" in data else None
+        )
+        hourly_aq = _from_payload(HourlyAirQuality, data["hourly"]) if "hourly" in data else None
 
         return AirQualityResult(
             latitude=data["latitude"],
@@ -929,6 +673,35 @@ class OpenMeteo:
             current=current_aq,
             hourly=hourly_aq,
         )
+
+    def marine(self, latitude: float, longitude: float) -> dict[str, Any]:
+        """Get a seven-day marine forecast."""
+        query = self._build_query(
+            {
+                "latitude": latitude,
+                "longitude": longitude,
+                "hourly": [
+                    "wave_height",
+                    "wave_direction",
+                    "wave_period",
+                    "wind_wave_height",
+                    "wind_wave_direction",
+                    "swell_wave_height",
+                    "swell_wave_direction",
+                    "swell_wave_period",
+                ],
+                "daily": [
+                    "wave_height_max",
+                    "wave_direction_dominant",
+                    "wave_period_max",
+                    "wind_wave_height_max",
+                    "swell_wave_height_max",
+                ],
+                "timezone": "auto",
+                "forecast_days": 7,
+            }
+        )
+        return self._request(f"{MARINE_BASE_URL}/marine?{query}", ttl=600)
 
     def historical(
         self,
@@ -1116,34 +889,6 @@ class NWSClient:
         else:
             url = f"{self.base_url}/alerts?point={latitude},{longitude}"
 
-        data = self._request(url, ttl=300)
-
-        alerts = []
-        features = data.get("features", [])
-        for feature in features:
-            props = feature.get("properties", {})
-            alerts.append(
-                WeatherAlert(
-                    id=props.get("id", ""),
-                    event=props.get("event", "Unknown"),
-                    severity=props.get("severity", "Unknown"),
-                    certainty=props.get("certainty", "Unknown"),
-                    urgency=props.get("urgency", "Unknown"),
-                    headline=props.get("headline", ""),
-                    description=props.get("description", ""),
-                    instruction=props.get("instruction"),
-                    onset=props.get("onset"),
-                    expires=props.get("expires"),
-                    sender_name=props.get("senderName", ""),
-                    areas=props.get("areaDesc", "").split("; "),
-                )
-            )
-
-        return alerts
-
-    def get_alerts_by_zone(self, zone_id: str) -> list[WeatherAlert]:
-        """Get alerts for a specific NWS zone."""
-        url = f"{self.base_url}/alerts/active/zone/{zone_id}"
         data = self._request(url, ttl=300)
 
         alerts = []

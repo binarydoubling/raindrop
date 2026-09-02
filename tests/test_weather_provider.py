@@ -2,6 +2,7 @@
 
 import pytest
 
+from raindrop.open_meteo import OpenMeteo
 from raindrop.settings import Settings
 from raindrop.weather_provider import XweatherWeatherProvider, select_weather_provider
 
@@ -143,6 +144,7 @@ def test_model_selection_keeps_auto_on_open_meteo(monkeypatch: pytest.MonkeyPatc
 
     assert selection.name == "open-meteo"
     assert selection.model_label == "gfs"
+    assert isinstance(selection.client, OpenMeteo)
 
 
 def test_xweather_normalizes_current_hourly_and_daily_units() -> None:

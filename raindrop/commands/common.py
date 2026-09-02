@@ -1,13 +1,16 @@
 """Shared helpers for CLI command modules."""
 
+import json
 from typing import Any
 
 import click
+from rich.console import Console
 
 from raindrop.open_meteo import GeocodingResult, NWSClient, OpenMeteo, OpenMeteoError
-from raindrop.settings import Settings, normalize_country_code, resolve_model
+from raindrop.settings import Settings, normalize_country_code
 from raindrop.weather_provider import WeatherProviderSelection, select_weather_provider
 
+console = Console()
 om = OpenMeteo()
 nws = NWSClient()
 
@@ -51,17 +54,6 @@ def resolve_location_or_fail(
     return resolved_location, resolved_country
 
 
-def resolve_model_or_fail(
-    model_name: str | None,
-    settings: Settings,
-) -> tuple[str | None, list[str] | None]:
-    """Resolve an Open-Meteo model and convert validation failures to Click errors."""
-    try:
-        return resolve_model(model_name, settings)
-    except ValueError as e:
-        raise click.ClickException(str(e)) from e
-
-
 def resolve_weather_provider_or_fail(
     model_name: str | None,
     settings: Settings,
@@ -78,6 +70,11 @@ def format_weather_source(selection: WeatherProviderSelection) -> str:
     if selection.attribution:
         return f"Source: {selection.model_label} · {selection.attribution}"
     return f"Source: {selection.label} · Model: {selection.model_label}"
+
+
+def echo_json(payload: Any) -> None:
+    """Write indented JSON to stdout."""
+    click.echo(json.dumps(payload, indent=2))
 
 
 def location_payload(result: GeocodingResult) -> dict[str, Any]:

@@ -1,14 +1,14 @@
 """Clothing suggestions based on weather conditions."""
 
-import json as json_lib
-
 import click
-from rich.console import Console
 
 from raindrop.commands.common import (
+    console,
+    echo_json,
     format_location,
     format_weather_source,
     geocode,
+    location_payload,
     resolve_location_or_fail,
     resolve_weather_provider_or_fail,
 )
@@ -17,8 +17,7 @@ from raindrop.utils import (
     TEMP_SYMBOLS,
     WEATHER_CODES,
 )
-
-console = Console()
+from raindrop.weather_provider import provider_source_payload
 
 
 def get_temp_category(temp: float, unit: str) -> str:
@@ -222,7 +221,6 @@ def clothing(location: str | None, country: str | None, as_json: bool):
             "wind_speed_10m",
             "relative_humidity_2m",
             "uv_index",
-            "precipitation",
         ],
         temperature_unit=settings.temperature_unit,
         wind_speed_unit=settings.wind_speed_unit,
@@ -249,16 +247,8 @@ def clothing(location: str | None, country: str | None, as_json: bool):
     # JSON output
     if as_json:
         data = {
-            "location": {
-                "name": result.name,
-                "admin1": result.admin1,
-                "country": result.country,
-            },
-            "source": {
-                "provider": weather_provider.name,
-                "label": weather_provider.label,
-                "attribution": weather_provider.attribution,
-            },
+            "location": location_payload(result),
+            "source": provider_source_payload(weather_provider),
             "conditions": {
                 "temperature": c.temperature_2m,
                 "feels_like": c.apparent_temperature,
@@ -270,7 +260,7 @@ def clothing(location: str | None, country: str | None, as_json: bool):
             },
             "recommendations": recommendations,
         }
-        click.echo(json_lib.dumps(data, indent=2))
+        echo_json(data)
         return
 
     # Display

@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="#installation"><img src="https://img.shields.io/badge/python-3.12+-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python 3.12+"></a>
-  <a href="#commands"><img src="https://img.shields.io/badge/commands-19-22c55e?style=flat-square" alt="19 Commands"></a>
+  <a href="#commands"><img src="https://img.shields.io/badge/commands-18-22c55e?style=flat-square" alt="18 Commands"></a>
   <a href="https://open-meteo.com/"><img src="https://img.shields.io/badge/API-Open--Meteo-f97316?style=flat-square" alt="Open-Meteo"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-MIT-a855f7?style=flat-square" alt="MIT License"></a>
   <a href="#"><img src="https://img.shields.io/badge/dependencies-2-64748b?style=flat-square" alt="2 Dependencies"></a>
@@ -90,7 +90,7 @@ raindrop outside Tokyo --compact
 
 ### Measured Station Observations
 
-Nearby personal weather station and official station observations through Xweather. These are measured station readings with station IDs, source classification, timestamps, QC/trust status, and freshness — separate from `raindrop current`, which remains Open-Meteo model/gridded current conditions.
+Nearby personal weather station and official station observations through Xweather. These are measured station readings with station IDs, source classification, timestamps, QC/trust status, and freshness — separate from model/gridded conditions returned by `raindrop current`.
 
 ```bash
 raindrop stations nearby Fairbanks
@@ -170,7 +170,6 @@ raindrop dashboard Seattle --refresh 300
 | `precip` | Precipitation totals | `raindrop precip Seattle --days 7` |
 | `fav` / `favorites` | Manage saved locations | `raindrop favorites list` |
 | `config` | View/edit settings | `raindrop config show` |
-| `completions` | Shell completions | `raindrop completions bash` |
 
 ### Global Options
 
@@ -222,15 +221,17 @@ raindrop config cache --clear         # clear cache
 
 ## Shell Completions
 
+Click provides completions directly from the installed command:
+
 ```bash
-# Bash
-raindrop completions bash >> ~/.bashrc && source ~/.bashrc
+# Bash: add to ~/.bashrc
+eval "$(_RAINDROP_COMPLETE=bash_source raindrop)"
 
-# Zsh
-raindrop completions zsh >> ~/.zshrc && source ~/.zshrc
+# Zsh: add to ~/.zshrc
+eval "$(_RAINDROP_COMPLETE=zsh_source raindrop)"
 
-# Fish
-raindrop completions fish > ~/.config/fish/completions/raindrop.fish
+# Fish: add to ~/.config/fish/config.fish
+_RAINDROP_COMPLETE=fish_source raindrop | source
 ```
 
 ---
@@ -255,8 +256,8 @@ The entire project has only **2 runtime dependencies** (Click and Rich). HTTP, c
 - **Measured station observations** with provider/source identity, timestamps, QC/trust labels, freshness filtering, and safe credential-free cache keys
 - **Sparklines** via Unicode block characters (`▁▂▃▄▅▆▇█`)
 - **EMA crossovers** and rate-of-change analysis on temperature data
-- **Pure-Python astronomy** — moon phases, Julian day, daylight duration with no external libs
-- **Haversine sampling** along OSRM polylines for route weather checkpoints
+- **Pure-Python astronomy** — moon phases and daylight calculations with no external libs
+- **Distance sampling** along OSRM routes for weather checkpoints
 - **File-based cache** with SHA256 keys and endpoint-specific TTLs
 - **14 weather models** selectable: ECMWF, GFS, HRRR, ICON, ARPEGE, AROME, UKMO, GEM, JMA, MetNo, and more
 

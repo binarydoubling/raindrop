@@ -1,15 +1,20 @@
 """Marine weather forecast command."""
 
-import json as json_lib
 from datetime import datetime
 
 import click
 from rich import box
-from rich.console import Console
 from rich.table import Table
 
-from raindrop.cache import cached_request
-from raindrop.commands.common import format_location, geocode, resolve_location_or_fail
+from raindrop.commands.common import (
+    console,
+    echo_json,
+    format_location,
+    geocode,
+    location_payload,
+    om,
+    resolve_location_or_fail,
+)
 from raindrop.settings import get_settings
 from raindrop.utils import (
     deg_to_compass,
@@ -17,62 +22,6 @@ from raindrop.utils import (
     now_in_timezone,
     sparkline,
 )
-
-console = Console()
-
-
-# Marine API endpoint
-MARINE_BASE_URL = "https://marine-api.open-meteo.com/v1"
-
-
-def get_marine_forecast(lat: float, lon: float, settings) -> dict:
-    """Fetch marine weather forecast from Open-Meteo Marine API."""
-    import json
-    import urllib.error
-    import urllib.parse
-    import urllib.request
-
-    params = {
-        "latitude": lat,
-        "longitude": lon,
-        "hourly": ",".join(
-            [
-                "wave_height",
-                "wave_direction",
-                "wave_period",
-                "wind_wave_height",
-                "wind_wave_direction",
-                "swell_wave_height",
-                "swell_wave_direction",
-                "swell_wave_period",
-            ]
-        ),
-        "daily": ",".join(
-            [
-                "wave_height_max",
-                "wave_direction_dominant",
-                "wave_period_max",
-                "wind_wave_height_max",
-                "swell_wave_height_max",
-            ]
-        ),
-        "timezone": "auto",
-        "forecast_days": 7,
-    }
-
-    query = urllib.parse.urlencode(params)
-    url = f"{MARINE_BASE_URL}/marine?{query}"
-
-    def fetch() -> dict:
-        try:
-            with urllib.request.urlopen(url, timeout=10) as response:
-                return json.loads(response.read().decode())
-        except urllib.error.HTTPError as e:
-            raise click.ClickException(f"Could not fetch marine forecast: HTTP {e.code}") from e
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
-            raise click.ClickException(f"Could not fetch marine forecast: {e}") from e
-
-    return cached_request(f"marine:{url}", fetch, ttl=600)
 
 
 def wave_height_color(height: float) -> str:
@@ -137,8 +86,7 @@ def marine(location: str | None, country: str | None, days: int, as_json: bool):
 
     result = geocode(location, country)
 
-    # Fetch marine data
-    data = get_marine_forecast(result.latitude, result.longitude, settings)
+    data = om.marine(result.latitude, result.longitude)
 
     hourly = data.get("hourly", {})
     daily = data.get("daily", {})
@@ -152,17 +100,11 @@ def marine(location: str | None, country: str | None, days: int, as_json: bool):
     # JSON output
     if as_json:
         output = {
-            "location": {
-                "name": result.name,
-                "admin1": result.admin1,
-                "country": result.country,
-                "latitude": result.latitude,
-                "longitude": result.longitude,
-            },
+            "location": location_payload(result),
             "hourly": hourly,
             "daily": daily,
         }
-        click.echo(json_lib.dumps(output, indent=2))
+        echo_json(output)
         return
 
     # Display header

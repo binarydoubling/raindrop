@@ -1,17 +1,18 @@
 """Hourly forecast command."""
 
-import json as json_lib
 from datetime import datetime
 
 import click
 from rich import box
-from rich.console import Console
 from rich.table import Table
 
 from raindrop.commands.common import (
+    console,
+    echo_json,
     format_location,
     format_weather_source,
     geocode,
+    location_payload,
     resolve_location_or_fail,
     resolve_weather_provider_or_fail,
 )
@@ -28,8 +29,7 @@ from raindrop.utils import (
     now_in_timezone,
     sparkline,
 )
-
-console = Console()
+from raindrop.weather_provider import provider_source_payload
 
 
 @click.command()
@@ -124,19 +124,9 @@ def hourly(
             )
 
         data = {
-            "location": {
-                "name": result.name,
-                "admin1": result.admin1,
-                "country": result.country,
-                "latitude": result.latitude,
-                "longitude": result.longitude,
-            },
+            "location": location_payload(result),
             "model": weather_provider.model_label,
-            "source": {
-                "provider": weather_provider.name,
-                "label": weather_provider.label,
-                "attribution": weather_provider.attribution,
-            },
+            "source": provider_source_payload(weather_provider),
             "hours": hourly_data,
             "units": {
                 "temperature": settings.temperature_unit,
@@ -144,7 +134,7 @@ def hourly(
                 "precipitation": settings.precipitation_unit,
             },
         }
-        click.echo(json_lib.dumps(data, indent=2))
+        echo_json(data)
         return
 
     # Sparkline output

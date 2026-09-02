@@ -9,9 +9,6 @@ RAIN_CODES = {51, 53, 55, 61, 63, 65, 80, 81, 82}
 SNOW_CODES = {71, 73, 75}
 FOG_CODES = {45, 48}
 STORM_CODES = {95, 96, 99}
-CLEAR_CODES = {0, 1}
-PARTLY_CLOUDY_CODES = {2}
-OVERCAST_CODES = {3}
 
 
 @dataclass(frozen=True)

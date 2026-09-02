@@ -7,6 +7,13 @@ from raindrop.cache import reset_cache
 from raindrop.cli import cli
 
 
+def test_version_comes_from_package_metadata() -> None:
+    result = CliRunner().invoke(cli, ["--version"])
+
+    assert result.exit_code == 0
+    assert "0.1.0" in result.output
+
+
 def test_favorites_alias_is_registered() -> None:
     runner = CliRunner()
 
