@@ -15,6 +15,7 @@ from raindrop.commands.current import current
 from raindrop.commands.daily import daily
 from raindrop.commands.dashboard import dashboard
 from raindrop.commands.discussion import discussion
+from raindrop.commands.ensemble import ensemble
 from raindrop.commands.favorites import fav
 from raindrop.commands.history import history
 from raindrop.commands.hourly import hourly
@@ -43,6 +44,7 @@ cli.add_command(daily)
 cli.add_command(aqi)
 cli.add_command(alerts)
 cli.add_command(discussion)
+cli.add_command(ensemble)
 cli.add_command(precip)
 cli.add_command(compare)
 cli.add_command(history)

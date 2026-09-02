@@ -14,6 +14,13 @@ def test_version_comes_from_package_metadata() -> None:
     assert "0.1.0" in result.output
 
 
+def test_ensemble_group_is_registered() -> None:
+    result = CliRunner().invoke(cli, ["ensemble", "--help"])
+
+    assert result.exit_code == 0
+    assert {"forecast", "member", "models", "rank"} <= set(result.output.split())
+
+
 def test_favorites_alias_is_registered() -> None:
     runner = CliRunner()
 

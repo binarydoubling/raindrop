@@ -86,6 +86,55 @@ def test_forecast_maps_known_fields_and_ignores_unknown_fields(
     assert result.current.is_day is False
 
 
+def test_ensemble_uses_member_endpoint_and_query(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = OpenMeteo()
+    requested: list[tuple[str, int | None]] = []
+
+    def fake_request(url: str, ttl: int | None = None) -> dict:
+        requested.append((url, ttl))
+        return {"hourly": {}}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+
+    result = client.ensemble(
+        1.0,
+        2.0,
+        model="ncep_gefs_seamless",
+        variables=["temperature_2m", "precipitation"],
+        steps=12,
+    )
+
+    assert result == {"hourly": {}}
+    assert requested[0][0].startswith("https://ensemble-api.open-meteo.com/v1/ensemble?")
+    assert "models=ncep_gefs_seamless" in requested[0][0]
+    assert "hourly=temperature_2m%2Cprecipitation" in requested[0][0]
+    assert "forecast_hours=12" in requested[0][0]
+    assert requested[0][1] == 300
+
+
+def test_ensemble_supports_daily_variables(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = OpenMeteo()
+    requested: list[str] = []
+    monkeypatch.setattr(
+        client,
+        "_request",
+        lambda url, ttl=None: requested.append(url) or {"daily": {}},
+    )
+
+    client.ensemble(
+        1.0,
+        2.0,
+        model="ncep_gefs_seamless",
+        variables=["temperature_2m_mean"],
+        interval="daily",
+        steps=7,
+    )
+
+    assert "daily=temperature_2m_mean" in requested[0]
+    assert "forecast_days=7" in requested[0]
+    assert "forecast_hours" not in requested[0]
+
+
 def test_marine_uses_shared_transport(monkeypatch: pytest.MonkeyPatch) -> None:
     client = OpenMeteo()
     requested: list[tuple[str, int | None]] = []

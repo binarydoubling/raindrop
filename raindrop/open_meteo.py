@@ -13,6 +13,7 @@ FORECAST_BASE_URL = "https://api.open-meteo.com/v1"
 GEOCODING_BASE_URL = "https://geocoding-api.open-meteo.com/v1"
 AIR_QUALITY_BASE_URL = "https://air-quality-api.open-meteo.com/v1"
 HISTORICAL_BASE_URL = "https://archive-api.open-meteo.com/v1"
+ENSEMBLE_BASE_URL = "https://ensemble-api.open-meteo.com/v1"
 MARINE_BASE_URL = "https://marine-api.open-meteo.com/v1"
 NWS_API_BASE_URL = "https://api.weather.gov"
 
@@ -673,6 +674,40 @@ class OpenMeteo:
             current=current_aq,
             hourly=hourly_aq,
         )
+
+    def ensemble(
+        self,
+        latitude: float,
+        longitude: float,
+        *,
+        model: str,
+        variables: list[str],
+        interval: Literal["hourly", "daily"] = "hourly",
+        steps: int = 24,
+        temporal_resolution: Literal["native", "hourly", "hourly_3", "hourly_6"] = "hourly",
+        temperature_unit: TemperatureUnit = "celsius",
+        wind_speed_unit: WindSpeedUnit = "kmh",
+        precipitation_unit: PrecipitationUnit = "mm",
+    ) -> dict[str, Any]:
+        """Get individual ensemble-member forecasts."""
+        params: dict[str, Any] = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "models": model,
+            interval: variables,
+            "timezone": "auto",
+            "temperature_unit": temperature_unit,
+            "wind_speed_unit": wind_speed_unit,
+            "precipitation_unit": precipitation_unit,
+        }
+        if interval == "hourly":
+            params["forecast_hours"] = steps
+            params["temporal_resolution"] = temporal_resolution
+        else:
+            params["forecast_days"] = steps
+
+        query = self._build_query(params)
+        return self._request(f"{ENSEMBLE_BASE_URL}/ensemble?{query}", ttl=300)
 
     def marine(self, latitude: float, longitude: float) -> dict[str, Any]:
         """Get a seven-day marine forecast."""

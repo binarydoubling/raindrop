@@ -13,6 +13,7 @@ Build backend: Hatchling.
 raindrop/
   cli.py               # Click group and command registration
   open_meteo.py        # Open-Meteo and NWS clients and response models
+  ensemble.py          # Ensemble-member extraction and statistics
   settings.py          # Persistent configuration
   weather_provider.py  # Forecast provider selection and normalization
   commands/            # CLI command modules and shared command helpers
@@ -115,7 +116,7 @@ docstrings. Click command docstrings are user-facing help.
 - HTTP: `urllib.request`; no requests/httpx.
 - Astronomy: pure Python.
 - Cache: JSON files with SHA256-derived keys.
-- APIs: Open-Meteo, OSRM, NWS, and optional credentialed Xweather.
+- APIs: Open-Meteo Forecast/Ensemble, OSRM, NWS, and optional credentialed Xweather.
 - `--json` command output uses the shared indented serializer.
 - Xweather credentials must never be printed, serialized into output, or included in cache keys.
 - `--model` selects Open-Meteo; provider `auto` otherwise prefers configured Xweather.
