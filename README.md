@@ -82,9 +82,9 @@ is for Python weather-consuming apps, reports and dashboards. It covers cases
 including null/missing values, truncated horizons, stale cache and units. It is
 not automated tests or a claim that Raindrop passes.
 
-A proposed optional **$19 offline pack is unbuilt and interest-only**, with no
-checkout or preorder. The existing CLI remains MIT-licensed. Actual maintainers
-are invited to share their use case and integration failure in that issue.
+The proposed paid pack was retired; **no paid pack or preorder is available**.
+See the [free-tool mapping](https://github.com/binarydoubling/raindrop/issues/1#issuecomment-6132705651).
+The existing CLI remains MIT-licensed.
 
 ---
 
