@@ -45,6 +45,10 @@ Most weather CLIs give you temperature and a condition. Raindrop gives you **eve
 
 **Requirements:** Python 3.12+
 
+PyPI release `rdrop==0.1.0` supports the core `raindrop current Seattle` workflow.
+The newer `window`/`outside`, `ensemble`, and `stations` commands documented below
+require installation from source; use `raindrop --help` to see your installed commands.
+
 ```bash
 # pip
 pip install rdrop
